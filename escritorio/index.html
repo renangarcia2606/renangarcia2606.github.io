@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escritório de Tráfego</title>
+<style>
+  :root {
+    --bg: #12131a;
+    --panel: #1a1a19;
+    --panel-2: #24241f;
+    --line: #3a3a35;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --muted: #8c8b82;
+    --accent: #3987e5;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+  .tag { font-size: 11px; color: var(--warning); border: 1px solid #5a4a1c; background: #2a2414; padding: 2px 8px; border-radius: 99px; }
+
+  .hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+  .tile .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .tile .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .s { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .tile input { width: 100%; font: inherit; font-size: 18px; font-weight: 700; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+
+  .stage { position: relative; background: #000; border: 2px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; touch-action: manipulation; }
+  .hint { color: var(--muted); font-size: 12px; margin: 8px 2px 0; }
+  .shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .shortcuts button, .btn {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 99px; padding: 6px 12px; cursor: pointer;
+  }
+  .shortcuts button:hover, .btn:hover { border-color: var(--accent); }
+  .shortcuts button:focus-visible, .btn:focus-visible, .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 4px; border-radius: 99px; background: var(--panel-2); color: var(--text); white-space: nowrap; }
+  .status i { font-style: normal; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 11px; font-weight: 800; color: #111; }
+  .status.good i { background: var(--good); color: #fff; }
+  .status.warning i { background: var(--warning); }
+  .status.critical i { background: var(--critical); color: #fff; }
+
+  /* Modal */
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow-y: auto; z-index: 10; }
+  .backdrop.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: 100%; max-width: 900px; padding: 18px; position: relative; }
+  .modal h2 { margin: 0 34px 4px 0; font-size: 19px; }
+  .modal h3 { font-size: 14px; margin: 18px 0 8px; color: var(--text-2); text-transform: uppercase; letter-spacing: .5px; }
+  .modal .sub { color: var(--text-2); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 18px; cursor: pointer; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .kpis .tile .v { font-size: 17px; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .chart { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
+  .chart .t { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .chart svg { width: 100%; height: auto; display: block; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; background: var(--panel-2); }
+  th:first-child, td:first-child { text-align: left; }
+  tr:last-child td { border-bottom: 0; }
+  td.wrap-cell { white-space: normal; min-width: 220px; text-align: left; color: var(--text-2); }
+  .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+  .copy { font-size: 13px; color: var(--text-2); margin: 4px 0 0; }
+  .copy b { color: var(--text); }
+  .summary { font-size: 15px; line-height: 1.6; }
+
+  #tip { position: fixed; pointer-events: none; z-index: 20; background: #0b0b0b; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; }
+
+  @media (max-width: 640px) {
+    .hud { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .modal { padding: 14px; }
+    .backdrop { padding: 12px 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>🏢 Escritório de Tráfego</h1>
+    <span class="tag">Dados de demonstração</span>
+  </header>
+
+  <section class="hud" aria-label="Resumo dos últimos 7 dias">
+    <div class="tile"><div class="k">Investimento · 7d</div><div class="v" id="hudSpend">–</div></div>
+    <div class="tile"><div class="k">Leads · 7d</div><div class="v" id="hudLeads">–</div></div>
+    <div class="tile"><div class="k">CPL médio · 7d</div><div class="v" id="hudCpl">–</div><div class="s" id="hudCplStatus"></div></div>
+    <div class="tile"><label class="k" for="metaInput">Meta de CPL (R$)</label><input id="metaInput" type="number" min="1" step="1" inputmode="decimal"></div>
+  </section>
+
+  <div class="stage">
+    <canvas id="office" aria-label="Escritório virtual. Use os botões abaixo para abrir as TVs e os colaboradores."></canvas>
+  </div>
+  <p class="hint">Clique numa TV para analisar a campanha, ou num colaborador para ver o trabalho dele. Clique no Gerente para receber o relatório geral.</p>
+  <nav class="shortcuts" id="shortcuts" aria-label="Atalhos"></nav>
+</div>
+
+<div class="backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <button class="close" id="closeBtn" aria-label="Fechar">×</button>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<div id="tip" role="status"></div>
+
+<script>
+(() => {
+  // ---------- Formatação ----------
+  const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const brl0 = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+  const int = new Intl.NumberFormat('pt-BR');
+  const dec = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = v => (v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+  const money = v => isFinite(v) ? brl.format(v) : '—';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---------- Meta de CPL ----------
+  const META_KEY = 'escritorio.metaCPL';
+  let metaCPL = 200;
+  try { const v = parseFloat(localStorage.getItem(META_KEY)); if (v > 0) metaCPL = v; } catch (e) {}
+
+  const STATUS = {
+    good: { icon: '✓', label: 'Dentro da meta', color: '#0ca30c' },
+    warning: { icon: '!', label: 'Atenção', color: '#fab219' },
+    critical: { icon: '✕', label: 'Acima da meta', color: '#d03b3b' },
+  };
+  const statusOf = cpl => cpl <= metaCPL ? 'good' : cpl <= metaCPL * 1.3 ? 'warning' : 'critical';
+  const badge = cpl => { const s = statusOf(cpl); return `<span class="status ${s}"><i>${STATUS[s].icon}</i>${STATUS[s].label}</span>`; };
+
+  // ---------- Dados falsos (determinísticos) ----------
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const rand = rng(20261015);
+
+  const DAYS = 7;
+  const dayLabels = Array.from({ length: DAYS }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (DAYS - 1 - i));
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  });
+
+  const CAMPAIGNS = [
+    { id: 'c1', name: 'Lead Magnet - eBook', short: 'eBook', budget: 900, cpl: 150, adsets: [
+      { name: 'Interesse - Marketing Digital', share: .55, ads: [
+        { name: 'Vídeo depoimento', ctr: .016, mult: .85, headline: 'eBook grátis: 7 passos para dobrar seus leads', text: 'Mais de 3.000 empresários já baixaram. Descubra o método que usamos com nossos clientes.' },
+        { name: 'Carrossel checklist', ctr: .012, mult: 1.15, headline: 'O checklist que todo gestor deveria ter', text: 'Baixe agora o eBook e pare de perder dinheiro com anúncios que não convertem.' },
+      ]},
+      { name: 'Lookalike 1% - Leads', share: .45, ads: [
+        { name: 'Imagem capa do eBook', ctr: .014, mult: .95, headline: 'Seu próximo cliente está a um clique', text: 'Material gratuito com estratégias testadas em mais de 200 campanhas.' },
+        { name: 'Reels bastidores', ctr: .011, mult: 1.1, headline: 'Veja como captamos 1.000 leads em 30 dias', text: 'Mostramos tudo no eBook gratuito. Link na página.' },
+      ]},
+    ]},
+    { id: 'c2', name: 'WhatsApp - Consultoria', short: 'Consultoria', budget: 1200, cpl: 232, adsets: [
+      { name: 'Público aberto - 25 a 45', share: .5, ads: [
+        { name: 'Vídeo especialista', ctr: .013, mult: .9, headline: 'Fale com um especialista agora', text: 'Diagnóstico gratuito das suas campanhas pelo WhatsApp. Vagas limitadas esta semana.' },
+        { name: 'Imagem prova social', ctr: .009, mult: 1.2, headline: '+R$ 2 milhões gerenciados em anúncios', text: 'Agende sua consultoria e descubra onde está o desperdício.' },
+      ]},
+      { name: 'Interesse - Empreendedorismo', share: .5, ads: [
+        { name: 'Carrossel resultados', ctr: .011, mult: 1.0, headline: 'Resultados reais de clientes reais', text: 'Clique e converse com nosso time pelo WhatsApp.' },
+        { name: 'Vídeo depoimento cliente', ctr: .012, mult: 1.05, headline: '"Triplicamos os leads em 2 meses"', text: 'Quer o mesmo para sua empresa? Chame no WhatsApp.' },
+      ]},
+    ]},
+    { id: 'c3', name: 'Remarketing 30d', short: 'Remarketing', budget: 600, cpl: 330, adsets: [
+      { name: 'Visitantes do site 30d', share: .6, ads: [
+        { name: 'Imagem oferta', ctr: .010, mult: .95, headline: 'Ainda pensando? Sua vaga está reservada', text: 'Volte e finalize seu cadastro. Bônus exclusivo até sexta.' },
+        { name: 'Vídeo FAQ', ctr: .007, mult: 1.25, headline: 'Tire suas dúvidas em 60 segundos', text: 'Respondemos as 5 perguntas mais comuns antes de você decidir.' },
+      ]},
+      { name: 'Engajou no Instagram 30d', share: .4, ads: [
+        { name: 'Carrossel benefícios', ctr: .009, mult: 1.0, headline: '5 motivos para começar hoje', text: 'Você já nos conhece. Agora é a hora de dar o próximo passo.' },
+        { name: 'Stories urgência', ctr: .008, mult: 1.1, headline: 'Últimas horas', text: 'O bônus acaba hoje à meia-noite.' },
+      ]},
+    ]},
+  ];
+
+  const blank = () => ({ spend: 0, imp: 0, reach: 0, clicks: 0, lpv: 0, leads: 0 });
+  const add = (a, b) => { for (const k in a) a[k] += b[k]; return a; };
+
+  for (const c of CAMPAIGNS) {
+    for (const s of c.adsets) {
+      for (const ad of s.ads) {
+        ad.daily = [];
+        for (let d = 0; d < DAYS; d++) {
+          const spend = c.budget * s.share * .5 * (.85 + .25 * rand());
+          const cpm = 22 + 16 * rand();
+          const imp = Math.round(spend / cpm * 1000);
+          const clicks = Math.round(imp * ad.ctr * (.85 + .3 * rand()));
+          const lpv = Math.round(clicks * (.66 + .2 * rand()));
+          const leads = Math.min(lpv, Math.max(0, Math.floor(spend / (c.cpl * ad.mult) * (.7 + .6 * rand()) + rand())));
+          const reach = Math.round(imp / (1.05 + .15 * rand()));
+          ad.daily.push({ spend, imp, reach, clicks, lpv, leads });
+        }
+      }
+      s.daily = Array.from({ length: DAYS }, (_, d) => s.ads.reduce((acc, ad) => add(acc, ad.daily[d]), blank()));
+    }
+    c.daily = Array.from({ length: DAYS }, (_, d) => c.adsets.reduce((acc, s) => add(acc, s.daily[d]), blank()));
+  }
+
+  // Métricas derivadas de um conjunto de linhas diárias.
+  function metrics(rows) {
+    const m = rows.reduce((acc, r) => add(acc, r), blank());
+    const reachPeriod = rows.length > 1 ? m.reach * .62 : m.reach;
+    return {
+      ...m,
+      cpl: m.leads ? m.spend / m.leads : Infinity,
+      ctr: m.imp ? m.clicks / m.imp : 0,
+      cpc: m.clicks ? m.spend / m.clicks : 0,
+      cpm: m.imp ? m.spend / m.imp * 1000 : 0,
+      connect: m.clicks ? m.lpv / m.clicks : 0,
+      conv: m.lpv ? m.leads / m.lpv : 0,
+      freq: reachPeriod ? m.imp / reachPeriod : 0,
+    };
+  }
+  const allDaily = Array.from({ length: DAYS }, (_, d) => CAMPAIGNS.reduce((acc, c) => add(acc, c.daily[d]), blank()));
+  for (const c of CAMPAIGNS) { c.m = metrics(c.daily); for (const s of c.adsets) { s.m = metrics(s.daily); for (const ad of s.ads) ad.m = metrics(ad.daily); } }
+  const allAds = CAMPAIGNS.flatMap(c => c.adsets.flatMap(s => s.ads.map(ad => ({ ad, s, c }))));
+  const allSets = CAMPAIGNS.flatMap(c => c.adsets.map(s => ({ s, c })));
+
+  // ---------- HUD ----------
+  function renderHud() {
+    const t = metrics(allDaily);
+    document.getElementById('hudSpend').textContent = brl0.format(t.spend);
+    document.getElementById('hudLeads').textContent = int.format(t.leads);
+    document.getElementById('hudCpl').textContent = money(t.cpl);
+    document.getElementById('hudCplStatus').innerHTML = badge(t.cpl);
+  }
+  const metaInput = document.getElementById('metaInput');
+  metaInput.value = metaCPL;
+  metaInput.addEventListener('change', () => {
+    const v = parseFloat(metaInput.value);
+    if (!(v > 0)) { metaInput.value = metaCPL; return; }
+    metaCPL = v;
+    try { localStorage.setItem(META_KEY, String(v)); } catch (e) {}
+    renderHud();
+  });
+  renderHud();
+
+  // ---------- Escritório (canvas) ----------
+  const W = 384, H = 256;
+  const canvas = document.getElementById('office');
+  const ctx = canvas.getContext('2d');
+  canvas.style.aspectRatio = W + ' / ' + H;
+
+  function resize() {
+    const cssW = canvas.clientWidth || W;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssW * H / W * dpr);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const TVS = CAMPAIGNS.map((c, i) => ({ c, x: 26 + i * 120, y: 8, w: 92, h: 52 }));
+
+  const PEOPLE = {
+    gestor:   { role: 'Gestor de Tráfego', plaque: 'GESTOR',   desk: { x: 26,  y: 104 }, look: { skin: '#e0ac69', hair: '#2b1d0e', shirt: '#2a78d6', pants: '#28304a' } },
+    copy:     { role: 'Copywriter',        plaque: 'COPY',     desk: { x: 146, y: 104 }, look: { skin: '#f1c27d', hair: '#a0522d', shirt: '#eb6834', pants: '#3a2f2a', long: true } },
+    analista: { role: 'Analista de Dados', plaque: 'ANALISTA', desk: { x: 266, y: 104 }, look: { skin: '#8d5524', hair: '#111111', shirt: '#1baf7a', pants: '#2b2b2b', glasses: true } },
+    gerente:  { role: 'Gerente',           plaque: 'GERENTE',  desk: { x: 146, y: 196 }, look: { skin: '#c68642', hair: '#555555', shirt: '#e8e8e8', pants: '#1f2533', tie: '#d03b3b' } },
+  };
+  for (const k in PEOPLE) {
+    const p = PEOPLE[k];
+    p.id = k;
+    p.seat = { x: p.desk.x + 46, y: p.desk.y + 6 };
+    p.pos = { ...p.seat };
+    p.walking = false; p.facing = 'down'; p.bubble = null;
+  }
+  const DESK_W = 92, DESK_H = 26;
+
+  const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
+
+  function drawRoom() {
+    // Piso de madeira
+    for (let y = 68; y < H; y += 12) {
+      const off = ((y - 68) / 12) % 2 ? 16 : 0;
+      for (let x = -off; x < W; x += 32) {
+        R(x, y, 32, 12, ((x + off) / 32 + (y - 68) / 12) % 2 ? '#7a5a40' : '#83624a');
+        R(x, y + 11, 32, 1, '#5e4430');
+        R(x + 31, y, 1, 12, '#5e4430');
+      }
+    }
+    // Parede
+    R(0, 0, W, 68, '#34405e');
+    for (let x = 0; x < W; x += 24) R(x, 0, 1, 64, '#2f3a56');
+    R(0, 64, W, 4, '#232c44');
+    // Tapete central
+    R(110, 150, 164, 34, '#4b2f4f'); R(114, 154, 156, 26, '#5a3a5f');
+    // Plantas
+    plant(6, 214); plant(360, 214); plant(6, 78); plant(360, 78);
+    // Bebedouro
+    R(330, 186, 14, 24, '#dfe6ee'); R(332, 176, 10, 12, '#7fc3ff'); R(330, 208, 14, 3, '#9aa4ae');
+  }
+  function plant(x, y) {
+    R(x + 2, y + 14, 14, 12, '#8a4b2a'); R(x, y + 12, 18, 4, '#a35a33');
+    R(x + 3, y + 2, 12, 12, '#2e8b3e'); R(x + 6, y - 4, 6, 10, '#38a24b'); R(x, y + 5, 6, 6, '#2e8b3e'); R(x + 12, y + 4, 6, 6, '#38a24b');
+  }
+
+  function drawTV(tv, t) {
+    const { c, x, y, w, h } = tv;
+    const st = statusOf(c.m.cpl);
+    const col = STATUS[st].color;
+    R(x - 3, y - 3, w + 6, h + 6, hover === tv ? '#9ec5ff' : '#0b0b0b');
+    R(x, y, w, h, '#0d1b2a');
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#c3c2b7'; ctx.font = '600 7px system-ui, sans-serif';
+    ctx.fillText(c.short.toUpperCase(), x + 4, y + 4);
+    ctx.fillStyle = '#f0efec'; ctx.font = '700 11px system-ui, sans-serif';
+    ctx.fillText('CPL ' + brl0.format(c.m.cpl), x + 4, y + 14);
+    ctx.fillStyle = '#8c8b82'; ctx.font = '6px system-ui, sans-serif';
+    ctx.fillText(int.format(c.m.leads) + ' leads · 7d', x + 4, y + 28);
+    // Mini barras de leads
+    const vals = c.daily.map(d => d.leads), mx = Math.max(...vals, 1);
+    vals.forEach((v, i) => { const bh = Math.max(1, v / mx * 12); R(x + 4 + i * 6, y + h - 5 - bh, 4, bh, '#3987e5'); });
+    // Luz de status (pisca quando crítico)
+    const on = st !== 'critical' || Math.floor(t / 400) % 2 === 0;
+    R(x + w - 12, y + 4, 8, 8, on ? col : '#3a1010');
+    ctx.fillStyle = st === 'warning' ? '#111' : '#fff'; ctx.font = '800 6px system-ui, sans-serif';
+    if (on) ctx.fillText(STATUS[st].icon, x + w - 10, y + 5);
+    // Faixa de status
+    R(x, y + h + 3, w, 3, col);
+    // Suporte
+    R(x + w / 2 - 3, y + h + 6, 6, 2, '#0b0b0b');
+  }
+
+  function drawPerson(p, t) {
+    const { x, y } = p.pos, L = p.look;
+    const seated = !p.walking && p.pos.x === p.seat.x && p.pos.y === p.seat.y;
+    const step = p.walking ? (Math.floor(t / 140) % 2 ? 1 : -1) : 0;
+    // Pernas
+    if (!seated) {
+      R(x - 4, y - 8, 3, 8 + (step > 0 ? 0 : -1), L.pants);
+      R(x + 1, y - 8, 3, 8 + (step < 0 ? 0 : -1), L.pants);
+      R(x - 5, y - 1 + (step > 0 ? 0 : -1), 4, 2, '#1a1a1a');
+      R(x + 1, y - 1 + (step < 0 ? 0 : -1), 4, 2, '#1a1a1a');
+    }
+    // Corpo
+    R(x - 6, y - 18, 12, 10, L.shirt);
+    if (L.tie) { R(x - 1, y - 17, 2, 7, L.tie); R(x - 6, y - 18, 3, 10, '#2a2f3d'); R(x + 3, y - 18, 3, 10, '#2a2f3d'); }
+    // Braços (digitando quando sentado)
+    const typing = seated && p.id !== 'gerente' ? (Math.floor(t / 180 + x) % 2) : 0;
+    R(x - 8, y - 17, 2, 6, L.tie ? '#2a2f3d' : L.shirt); R(x + 6, y - 17, 2, 6, L.tie ? '#2a2f3d' : L.shirt);
+    R(x - 8, y - 11 - typing, 2, 2, L.skin); R(x + 6, y - 11 - (1 - typing) * (seated && p.id !== 'gerente' ? 1 : 0), 2, 2, L.skin);
+    // Cabeça
+    R(x - 5, y - 28, 10, 10, L.skin);
+    R(x - 5, y - 29, 10, 3, L.hair);
+    if (L.long) { R(x - 6, y - 28, 2, 10, L.hair); R(x + 4, y - 28, 2, 10, L.hair); }
+    else { R(x - 5, y - 27, 1, 4, L.hair); R(x + 4, y - 27, 1, 4, L.hair); }
+    if (p.facing === 'up') { R(x - 5, y - 27, 10, 8, L.hair); }
+    else {
+      R(x - 3, y - 23, 2, 2, '#1a1a1a'); R(x + 1, y - 23, 2, 2, '#1a1a1a');
+      if (L.glasses) { R(x - 4, y - 24, 4, 1, '#dddddd'); R(x, y - 24, 4, 1, '#dddddd'); }
+      R(x - 1, y - 20, 2, 1, '#8a3a2a');
+    }
+  }
+
+  function drawChair(p) { const { x, y } = p.seat; R(x - 8, y - 22, 16, 14, '#2b2b33'); R(x - 7, y - 21, 14, 12, '#3a3a46'); }
+
+  function drawDesk(p) {
+    const { x, y } = p.desk;
+    R(x, y, DESK_W, 8, hover === p ? '#c9a27a' : '#a0764f');
+    R(x, y + 8, DESK_W, DESK_H - 8, '#7a5636');
+    R(x + 4, y + DESK_H, 4, 3, '#5e4430'); R(x + DESK_W - 8, y + DESK_H, 4, 3, '#5e4430');
+    // Placa
+    ctx.font = '700 7px system-ui, sans-serif'; ctx.textBaseline = 'top';
+    const tw = ctx.measureText(p.plaque).width;
+    R(x + DESK_W / 2 - tw / 2 - 4, y + 12, tw + 8, 10, '#1a1a19');
+    ctx.fillStyle = '#f0efec'; ctx.fillText(p.plaque, x + DESK_W / 2 - tw / 2, y + 14);
+    // Monitor (lateral) e itens
+    R(x + 70, y - 10, 16, 11, '#111'); R(x + 71, y - 9, 14, 8, p.id === 'gerente' ? '#2a78d6' : '#1d3b5c');
+    R(x + 77, y + 1, 2, 2, '#111');
+    R(x + 8, y + 1, 10, 5, '#eee'); R(x + 20, y + 1, 4, 5, '#6b3f1f');
+  }
+
+  function drawBubble(p, t) {
+    if (!p.bubble || t > p.bubble.until) { p.bubble = null; return; }
+    ctx.font = '600 7px system-ui, sans-serif';
+    const words = p.bubble.text.split(' '), lines = []; let line = '';
+    for (const w of words) { const test = line ? line + ' ' + w : w; if (ctx.measureText(test).width > 112 && line) { lines.push(line); line = w; } else line = test; }
+    lines.push(line);
+    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + 10, bh = lines.length * 9 + 6;
+    let bx = Math.min(Math.max(p.pos.x - bw / 2, 2), W - bw - 2), by = p.pos.y - 34 - bh;
+    R(bx, by, bw, bh, '#ffffff'); R(bx - 1, by + 1, bw + 2, bh - 2, '#ffffff');
+    R(p.pos.x - 2, by + bh, 4, 3, '#ffffff');
+    ctx.fillStyle = '#111'; ctx.textBaseline = 'top';
+    lines.forEach((l, i) => ctx.fillText(l, bx + 5, by + 4 + i * 9));
+  }
+
+  // ---------- Animação do gerente ----------
+  let tour = null;
+  function startTour() {
+    if (tour) return;
+    const g = PEOPLE.gerente, aisle = 172;
+    const stops = ['gestor', 'copy', 'analista'];
+    const path = [{ x: g.seat.x, y: aisle }];
+    stops.forEach(id => path.push({ x: PEOPLE[id].seat.x, y: aisle, visit: id }));
+    path.push({ x: g.seat.x, y: aisle }, { x: g.seat.x, y: g.seat.y, end: true });
+    tour = { path, i: 0, wait: 0 };
+    g.walking = true;
+    say(g, 'Bora fechar o relatório do dia!', 1800);
+  }
+  const REPLIES = {
+    gestor: () => `Investimos ${brl0.format(metrics(allDaily).spend)} em 7 dias.`,
+    copy: () => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `Melhor CTR: "${b.ad.name}" (${pct(b.ad.m.ctr)}).`; },
+    analista: () => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `Top campanha: ${b.short}, CPL ${brl0.format(b.m.cpl)}.`; },
+  };
+  function updateTour(t, dt) {
+    if (!tour) return;
+    const g = PEOPLE.gerente;
+    if (tour.wait > 0) { tour.wait -= dt; return; }
+    const target = tour.path[tour.i];
+    const dx = target.x - g.pos.x, dy = target.y - g.pos.y, dist = Math.hypot(dx, dy), speed = .07 * dt;
+    g.walking = true;
+    g.facing = Math.abs(dy) > Math.abs(dx) && dy < 0 ? 'up' : 'down';
+    if (dist <= speed) {
+      g.pos.x = target.x; g.pos.y = target.y;
+      if (target.visit) { g.facing = 'up'; say(PEOPLE[target.visit], REPLIES[target.visit](), 1500); tour.wait = 1300; }
+      if (target.end) { g.walking = false; g.facing = 'down'; tour = null; openGerente(); return; }
+      tour.i++;
+    } else { g.pos.x += dx / dist * speed; g.pos.y += dy / dist * speed; }
+  }
+
+  function say(p, text, ms) { p.bubble = { text, until: performance.now() + ms }; }
+
+  // Falas aleatórias
+  const CHATTER = [
+    () => [PEOPLE.analista, (() => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `${b.short} é a melhor: CPL ${brl0.format(b.m.cpl)}`; })()],
+    () => [PEOPLE.gestor, (() => { const w = [...CAMPAIGNS].sort((a, z) => z.m.cpl - a.m.cpl)[0]; return statusOf(w.m.cpl) === 'critical' ? `De olho no ${w.short}, CPL alto!` : 'Todas as campanhas rodando.'; })()],
+    () => [PEOPLE.copy, (() => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `"${b.ad.headline}" está bombando`; })()],
+    () => [PEOPLE.analista, `Connect rate geral: ${pct(metrics(allDaily).connect)}`],
+  ];
+  let nextChat = 2500, chatIdx = 0;
+
+  // ---------- Loop ----------
+  let hover = null, last = performance.now();
+  function frame(t) {
+    const dt = Math.min(60, t - last); last = t;
+    updateTour(t, dt);
+    if (!tour && t > nextChat && !backdrop.classList.contains('open')) { const [p, text] = CHATTER[chatIdx++ % CHATTER.length](); say(p, text, 3200); nextChat = t + 6000; }
+
+    const k = canvas.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    drawRoom();
+    TVS.forEach(tv => drawTV(tv, t));
+
+    // Ordena por profundidade: cadeira+pessoa sentada antes da mesa; quem anda entra pela posição.
+    const items = [];
+    for (const k2 in PEOPLE) {
+      const p = PEOPLE[k2];
+      items.push({ z: p.desk.y + DESK_H, draw: () => drawDesk(p) });
+      items.push({ z: p.seat.y - 30, draw: () => drawChair(p) });
+      const seated = !p.walking && p.pos.x === p.seat.x && p.pos.y === p.seat.y;
+      items.push({ z: seated ? p.seat.y - 20 : p.pos.y, draw: () => drawPerson(p, t) });
+    }
+    items.sort((a, b) => a.z - b.z).forEach(i => i.draw());
+    for (const k2 in PEOPLE) drawBubble(PEOPLE[k2], t);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Clique / hover ----------
+  function hitTest(e) {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    for (const tv of TVS) if (x >= tv.x - 3 && x <= tv.x + tv.w + 3 && y >= tv.y - 3 && y <= tv.y + tv.h + 6) return tv;
+    for (const k in PEOPLE) {
+      const p = PEOPLE[k];
+      if (x >= p.desk.x && x <= p.desk.x + DESK_W && y >= p.seat.y - 32 && y <= p.desk.y + DESK_H + 3) return p;
+      if (p.walking && Math.abs(x - p.pos.x) < 10 && y > p.pos.y - 30 && y < p.pos.y + 2) return p;
+    }
+    return null;
+  }
+  canvas.addEventListener('mousemove', e => { hover = hitTest(e); canvas.style.cursor = hover ? 'pointer' : 'default'; });
+  canvas.addEventListener('mouseleave', () => { hover = null; });
+  canvas.addEventListener('click', e => { const h = hitTest(e); if (h) activate(h); });
+
+  function activate(h) {
+    if (h.c) return openTV(h.c);
+    if (h.id === 'gerente') return startTour();
+    ({ gestor: openGestor, copy: openCopy, analista: openAnalista })[h.id]();
+  }
+
+  const shortcuts = document.getElementById('shortcuts');
+  TVS.forEach(tv => { const b = document.createElement('button'); b.textContent = '📺 ' + tv.c.name; b.onclick = () => activate(tv); shortcuts.appendChild(b); });
+  [['gestor', '👨‍💻'], ['copy', '✍️'], ['analista', '📊'], ['gerente', '👔']].forEach(([id, ic]) => {
+    const b = document.createElement('button'); b.textContent = ic + ' ' + PEOPLE[id].role; b.onclick = () => activate(PEOPLE[id]); shortcuts.appendChild(b);
+  });
+
+  // ---------- Modal ----------
+  const backdrop = document.getElementById('backdrop');
+  const body = document.getElementById('modalBody');
+  let lastFocus = null;
+  function openModal(html) {
+    lastFocus = document.activeElement;
+    body.innerHTML = html;
+    backdrop.classList.add('open');
+    backdrop.scrollTop = 0;
+    document.getElementById('closeBtn').focus();
+  }
+  function closeModal() { backdrop.classList.remove('open'); tip.style.display = 'none'; if (lastFocus) lastFocus.focus(); }
+  document.getElementById('closeBtn').onclick = closeModal;
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && backdrop.classList.contains('open')) closeModal(); });
+
+  // Tooltip
+  const tip = document.getElementById('tip');
+  document.addEventListener('mouseover', e => { const el = e.target.closest('[data-tip]'); if (!el) { tip.style.display = 'none'; return; } tip.innerHTML = el.getAttribute('data-tip'); tip.style.display = 'block'; });
+  document.addEventListener('mousemove', e => { if (tip.style.display === 'block') { const x = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8); tip.style.left = x + 'px'; tip.style.top = (e.clientY + 14) + 'px'; } });
+
+  // ---------- Gráficos (SVG, uma série cada) ----------
+  function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
+  function chartFrame(maxV, fmtAxis, inner) {
+    const w = 320, h = 150, l = 44, r = 8, t = 10, b = 22, pw = w - l - r, ph = h - t - b;
+    const n = String(maxV)[0] === '2' ? 4 : 5;
+    let g = '';
+    for (let i = 0; i <= n; i++) {
+      const v = maxV * i / n, y = t + ph - ph * i / n;
+      g += `<line x1="${l}" x2="${w - r}" y1="${y}" y2="${y}" stroke="#3a3a35" stroke-width="1"/>`;
+      g += `<text x="${l - 6}" y="${y + 3}" fill="#8c8b82" font-size="9" text-anchor="end">${fmtAxis(v)}</text>`;
+    }
+    dayLabels.forEach((d, i) => { const x = l + pw * (i + .5) / DAYS; g += `<text x="${x}" y="${h - 6}" fill="#8c8b82" font-size="9" text-anchor="middle">${d}</text>`; });
+    return `<svg viewBox="0 0 ${w} ${h}" role="img">${g}${inner({ l, t, pw, ph, w, h })}</svg>`;
+  }
+  function barChart(vals, fmt) {
+    const maxV = niceMax(Math.max(...vals));
+    return chartFrame(maxV, v => int.format(Math.round(v)), ({ l, t, pw, ph }) => vals.map((v, i) => {
+      const slot = pw / DAYS, bw = slot * .5, x = l + slot * i + (slot - bw) / 2, bh = Math.max(1, v / maxV * ph), y = t + ph - bh, rr = Math.min(4, bh, bw / 2);
+      const path = `M${x},${t + ph} V${y + rr} Q${x},${y} ${x + rr},${y} H${x + bw - rr} Q${x + bw},${y} ${x + bw},${y + rr} V${t + ph} Z`;
+      return `<path d="${path}" fill="#3987e5"/><rect x="${l + slot * i}" y="${t}" width="${slot}" height="${ph}" fill="transparent" data-tip="${dayLabels[i]}: <b>${fmt(v)}</b>"/>`;
+    }).join(''));
+  }
+  function lineChart(vals, fmt, ref) {
+    const finite = vals.filter(isFinite);
+    const maxV = niceMax(Math.max(...finite, ref * 1.1));
+    return chartFrame(maxV, v => brl0.format(v), ({ l, t, pw, ph, w }) => {
+      const X = i => l + pw * (i + .5) / DAYS, Y = v => t + ph - v / maxV * ph;
+      const pts = vals.map((v, i) => isFinite(v) ? [X(i), Y(v)] : null);
+      const d = pts.filter(Boolean).map((p, i) => (i ? 'L' : 'M') + p[0] + ',' + p[1]).join(' ');
+      let s = `<line x1="${l}" x2="${w - 8}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="4 3"/>`;
+      s += `<text x="${w - 10}" y="${Y(ref) - 4}" fill="#c3c2b7" font-size="9" text-anchor="end">Meta ${brl0.format(ref)}</text>`;
+      s += `<path d="${d}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>`;
+      pts.forEach((p, i) => { if (p) s += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#3987e5" stroke="#24241f" stroke-width="2"/>`; });
+      vals.forEach((v, i) => { s += `<rect x="${l + pw * i / DAYS}" y="${t}" width="${pw / DAYS}" height="${ph}" fill="transparent" data-tip="${dayLabels[i]}: <b>${fmt(v)}</b>"/>`; });
+      return s;
+    });
+  }
+
+  // ---------- Janelas ----------
+  const kpi = (k, v, s = '') => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
+  const rowCells = m => `<td>${money(m.spend)}</td><td>${int.format(m.leads)}</td><td>${money(m.cpl)}</td><td>${pct(m.ctr)}</td><td>${pct(m.connect)}</td><td>${pct(m.conv)}</td>`;
+  const HEAD = '<th>Investimento</th><th>Leads</th><th>CPL</th><th>CTR</th><th>Connect rate</th><th>Conv. página</th>';
+
+  function openTV(c) {
+    const m = c.m;
+    const leadsDay = c.daily.map(d => d.leads);
+    const cplDay = c.daily.map(d => d.leads ? d.spend / d.leads : Infinity);
+    openModal(`
+      <h2>📺 ${esc(c.name)}</h2>
+      <div class="sub">${badge(m.cpl)} <span>Ativa · Orçamento ${brl0.format(c.budget)}/dia · Objetivo: Leads · Últimos 7 dias</span></div>
+      <h3>Números principais</h3>
+      <div class="kpis">
+        ${kpi('Leads', int.format(m.leads))}
+        ${kpi('Investimento', money(m.spend))}
+        ${kpi('CPL', money(m.cpl), `Meta: ${brl0.format(metaCPL)}`)}
+        ${kpi('Connect rate', pct(m.connect), 'Visitas na página ÷ cliques')}
+        ${kpi('Conv. da página', pct(m.conv), 'Leads ÷ visitas na página')}
+        ${kpi('CTR', pct(m.ctr))}
+        ${kpi('CPC', money(m.cpc))}
+        ${kpi('CPM', money(m.cpm))}
+        ${kpi('Impressões', int.format(m.imp))}
+        ${kpi('Cliques no link', int.format(m.clicks))}
+        ${kpi('Frequência', dec.format(m.freq))}
+      </div>
+      <h3>Dia a dia</h3>
+      <div class="charts">
+        <div class="chart"><div class="t">Leads por dia</div>${barChart(leadsDay, v => int.format(v) + ' leads')}</div>
+        <div class="chart"><div class="t">CPL por dia</div>${lineChart(cplDay, v => money(v), metaCPL)}</div>
+      </div>
+      <h3>Conjuntos de anúncios</h3>
+      <div class="scroll"><table><thead><tr><th>Conjunto</th>${HEAD}<th>Status</th></tr></thead><tbody>
+        ${c.adsets.map(s => `<tr><td>${esc(s.name)}</td>${rowCells(s.m)}<td>${badge(s.m.cpl)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <h3>Anúncios</h3>
+      <div class="scroll"><table><thead><tr><th>Anúncio</th>${HEAD}<th>Status</th><th>Copy</th></tr></thead><tbody>
+        ${c.adsets.flatMap(s => s.ads).map(ad => `<tr><td>${esc(ad.name)}</td>${rowCells(ad.m)}<td>${badge(ad.m.cpl)}</td><td class="wrap-cell"><b>${esc(ad.headline)}</b><br>${esc(ad.text)}</td></tr>`).join('')}
+      </tbody></table></div>
+    `);
+  }
+
+  function openGestor() {
+    const t = metrics(allDaily);
+    const worstAds = [...allAds].filter(x => statusOf(x.ad.m.cpl) === 'critical').sort((a, z) => z.ad.m.cpl - a.ad.m.cpl);
+    openModal(`
+      <h2>👨‍💻 Gestor de Tráfego</h2>
+      <div class="sub">Visão das campanhas · últimos 7 dias</div>
+      <div class="kpis" style="margin-top:12px">
+        ${kpi('Investimento', money(t.spend))}${kpi('Leads', int.format(t.leads))}${kpi('CPL médio', money(t.cpl))}
+        ${kpi('Orçamento diário', brl0.format(CAMPAIGNS.reduce((a, c) => a + c.budget, 0)))}
+        ${kpi('Investido hoje', money(allDaily[DAYS - 1].spend))}
+      </div>
+      <h3>Campanhas</h3>
+      <div class="scroll"><table><thead><tr><th>Campanha</th><th>Status</th><th>Orçamento/dia</th>${HEAD}</tr></thead><tbody>
+        ${CAMPAIGNS.map(c => `<tr><td>${esc(c.name)}</td><td>${badge(c.m.cpl)}</td><td>${brl0.format(c.budget)}</td>${rowCells(c.m)}</tr>`).join('')}
+      </tbody></table></div>
+      <h3>Sugestões do gestor</h3>
+      <div class="card"><ul>
+        ${worstAds.length ? worstAds.slice(0, 3).map(x => `<li>Pausar o anúncio <b>${esc(x.ad.name)}</b> (${esc(x.c.short)}): CPL ${money(x.ad.m.cpl)}.</li>`).join('') : '<li>Nenhum anúncio muito acima da meta.</li>'}
+        ${(() => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return statusOf(b.m.cpl) === 'good' ? `<li>Aumentar em até 20% o orçamento de <b>${esc(b.name)}</b>, que está com CPL ${money(b.m.cpl)}.</li>` : ''; })()}
+      </ul><p class="copy">Nesta versão o gestor só sugere. Na fase com inteligência ele poderá executar, dentro dos limites combinados.</p></div>
+    `);
+  }
+
+  function openCopy() {
+    const sorted = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr);
+    openModal(`
+      <h2>✍️ Copywriter</h2>
+      <div class="sub">Textos dos anúncios, do maior para o menor CTR · últimos 7 dias</div>
+      ${sorted.map((x, i) => `<div class="card" style="margin-top:${i ? 0 : 12}px">
+        <h4>${i === 0 ? '🏆 ' : i === sorted.length - 1 ? '⚠️ ' : ''}${esc(x.ad.name)} <span style="color:var(--muted);font-weight:400;font-size:13px">· ${esc(x.c.short)} · ${esc(x.s.name)}</span></h4>
+        <p class="copy"><b>${esc(x.ad.headline)}</b><br>${esc(x.ad.text)}</p>
+        <div class="sub" style="margin-top:8px"><span>CTR <b>${pct(x.ad.m.ctr)}</b></span><span>CPL <b>${money(x.ad.m.cpl)}</b></span><span>Leads <b>${int.format(x.ad.m.leads)}</b></span>${badge(x.ad.m.cpl)}</div>
+      </div>`).join('')}
+    `);
+  }
+
+  function analystInsights() {
+    const camps = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl);
+    const sets = [...allSets].sort((a, z) => a.s.m.cpl - z.s.m.cpl);
+    const ads = [...allAds].sort((a, z) => a.ad.m.cpl - z.ad.m.cpl);
+    const conn = [...CAMPAIGNS].sort((a, z) => z.m.connect - a.m.connect);
+    return { camps, sets, ads, conn };
+  }
+
+  function openAnalista() {
+    const { camps, sets, ads, conn } = analystInsights();
+    const medal = ['🥇', '🥈', '🥉'];
+    openModal(`
+      <h2>📊 Analista de Dados</h2>
+      <div class="sub">Ranking por CPL (menor é melhor) · últimos 7 dias</div>
+      <h3>Campanhas</h3>
+      <div class="scroll"><table><thead><tr><th>#</th><th>Campanha</th><th>Status</th>${HEAD}</tr></thead><tbody>
+        ${camps.map((c, i) => `<tr><td>${medal[i] || i + 1}</td><td style="text-align:left">${esc(c.name)}</td><td>${badge(c.m.cpl)}</td>${rowCells(c.m)}</tr>`).join('')}
+      </tbody></table></div>
+      <h3>Achados</h3>
+      <div class="card"><ul>
+        <li>Melhor conjunto: <b>${esc(sets[0].s.name)}</b> (${esc(sets[0].c.short)}), CPL ${money(sets[0].s.m.cpl)}.</li>
+        <li>Pior conjunto: <b>${esc(sets[sets.length - 1].s.name)}</b> (${esc(sets[sets.length - 1].c.short)}), CPL ${money(sets[sets.length - 1].s.m.cpl)}.</li>
+        <li>Melhor anúncio: <b>${esc(ads[0].ad.name)}</b> (${esc(ads[0].c.short)}), CPL ${money(ads[0].ad.m.cpl)}.</li>
+        <li>Pior anúncio: <b>${esc(ads[ads.length - 1].ad.name)}</b> (${esc(ads[ads.length - 1].c.short)}), CPL ${money(ads[ads.length - 1].ad.m.cpl)}.</li>
+        <li>Melhor connect rate: <b>${esc(conn[0].name)}</b> (${pct(conn[0].m.connect)}). Pior: <b>${esc(conn[conn.length - 1].name)}</b> (${pct(conn[conn.length - 1].m.connect)}). Connect rate baixo costuma indicar página lenta.</li>
+      </ul></div>
+    `);
+  }
+
+  function openGerente() {
+    const t = metrics(allDaily), today = metrics([allDaily[DAYS - 1]]);
+    const { camps, ads } = analystInsights();
+    const byCtr = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr);
+    const bad = camps.filter(c => statusOf(c.m.cpl) !== 'good');
+    const ativos = CAMPAIGNS.length;
+    openModal(`
+      <h2>👔 Relatório do Gerente</h2>
+      <div class="sub">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</div>
+      <h3>Resumo do dia</h3>
+      <div class="card summary">
+        Hoje: <b>${int.format(today.leads)} leads</b> com <b>${money(today.spend)}</b> investidos, CPL de <b>${money(today.cpl)}</b> ${badge(today.cpl)}.
+        Nos últimos 7 dias foram ${int.format(t.leads)} leads a ${money(t.cpl)} cada.
+        Melhor campanha: <b>${esc(camps[0].name)}</b> (CPL ${money(camps[0].m.cpl)}).
+        ${bad.length ? `Atenção: <b>${bad.map(c => esc(c.name)).join('</b> e <b>')}</b> ${bad.length > 1 ? 'estão' : 'está'} acima da meta de ${brl0.format(metaCPL)}.` : 'Todas as campanhas estão dentro da meta. 🎉'}
+      </div>
+      <h3>Por colaborador</h3>
+      <div class="card"><h4>👨‍💻 Gestor de Tráfego</h4><ul>
+        <li>Investimento 7d: ${money(t.spend)} · Leads: ${int.format(t.leads)} · CPL médio: ${money(t.cpl)}</li>
+        <li>Campanhas ativas: ${ativos} · Pausadas: 0</li>
+      </ul></div>
+      <div class="card"><h4>✍️ Copywriter</h4><ul>
+        <li>Melhor CTR: <b>${esc(byCtr[0].ad.name)}</b> (${pct(byCtr[0].ad.m.ctr)}): "${esc(byCtr[0].ad.headline)}"</li>
+        <li>Pior CTR: <b>${esc(byCtr[byCtr.length - 1].ad.name)}</b> (${pct(byCtr[byCtr.length - 1].ad.m.ctr)}). Vale testar um novo texto.</li>
+      </ul></div>
+      <div class="card"><h4>📊 Analista de Dados</h4><ul>
+        ${camps.map((c, i) => `<li>${['🥇', '🥈', '🥉'][i] || i + 1} ${esc(c.name)}: CPL ${money(c.m.cpl)} · ${int.format(c.m.leads)} leads ${badge(c.m.cpl)}</li>`).join('')}
+        <li>Melhor anúncio: <b>${esc(ads[0].ad.name)}</b>, CPL ${money(ads[0].ad.m.cpl)}</li>
+      </ul></div>
+    `);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
