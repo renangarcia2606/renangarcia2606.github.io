@@ -128,7 +128,7 @@
     <canvas id="office" aria-label="Escritório virtual isométrico. Use a barra abaixo para abrir as TVs e os colaboradores."></canvas>
   </div>
   <nav class="toolbar" id="toolbar" aria-label="Atalhos"></nav>
-  <p class="hint">Clique numa TV para analisar a campanha, ou num colaborador para ver o trabalho dele. Clique no Gerente para receber o relatório geral.</p>
+  <p class="hint">Clique numa TV para analisar a campanha, ou num colaborador para ver o trabalho dele. Clique no Batman (Gerente) para ele fazer a ronda e entregar o relatório geral. Os personagens andam sozinhos pelo escritório.</p>
 </div>
 
 <div class="backdrop" id="backdrop">
@@ -272,11 +272,11 @@
   // =====================================================================
   //  Escritório isométrico
   // =====================================================================
-  const W = 480, H = 316;
+  const W = 600, H = 400;
   const TW = 32, TH = 16;          // losango do piso (2:1)
-  const GX = 13, GY = 10;          // tamanho da sala em tiles
-  const WALL = 96;                 // altura da parede
-  const OX = W / 2 + (GY - GX) * TW / 4, OY = 112;
+  const GX = 18, GY = 14;          // tamanho da sala em tiles
+  const WALL = 104;                // altura da parede
+  const OX = W / 2 + (GY - GX) * TW / 4, OY = 124;
   const FONT = '"Pixelify Sans", ui-monospace, monospace';
 
   const canvas = document.getElementById('office');
@@ -301,7 +301,7 @@
     if (fill) { ctx.fillStyle = fill; ctx.fill(); }
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .6; ctx.stroke(); }
   }
-  // Caixa isométrica: ocupa [gx, gx+w] x [gy, gy+d], da altura z até z+h.
+  // Caixa isométrica: ocupa [gx, gx+w] x [gy, gy+d], da altura z até z+h. col = [topo, frente-esq, frente-dir]
   function box(gx, gy, w, d, h, col, z = 0, edge = 'rgba(0,0,0,.45)') {
     const t = z + h;
     poly([iso(gx, gy + d, t), iso(gx + w, gy + d, t), iso(gx + w, gy + d, z), iso(gx, gy + d, z)], col[1], edge);
@@ -318,76 +318,511 @@
   const text = (s, x, y, size, color, weight = 400, align = 'left') => {
     ctx.font = `${weight} ${size}px ${FONT}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'top'; ctx.fillText(s, x, y);
   };
+  const glow = (color, blur, fn) => { ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = blur * K; fn(); ctx.restore(); };
 
-  // ---------- Pessoas e móveis ----------
-  const PEOPLE = {
-    gestor:   { role: 'Gestor de Tráfego', tag: 'Gestor',   at: [2, 2.45],  desk: [1, 2.95], look: { skin: '#e8b88a', hair: '#3b2614', shirt: '#2a78d6', pants: '#2b3350' } },
-    copy:     { role: 'Copywriter',        tag: 'Copy',     at: [6, 2.45],  desk: [5, 2.95], look: { skin: '#f3cfa2', hair: '#b5532c', shirt: '#eb6834', pants: '#3a2f2a', long: true } },
-    analista: { role: 'Analista de Dados', tag: 'Analista', at: [10, 2.45], desk: [9, 2.95], look: { skin: '#8d5524', hair: '#151515', shirt: '#1baf7a', pants: '#262626', glasses: true } },
-    gerente:  { role: 'Gerente',           tag: 'Gerente',  at: [6, 6.75],  desk: [5, 7.25], look: { skin: '#c68642', hair: '#6b6b6b', shirt: '#2a2f3d', pants: '#1f2533', suit: true } },
+  // ---------- Personagens ----------
+  const O = 'rgba(0,0,0,.8)';
+  const LOOKS = {
+    spider: {
+      mask: '#c8102e', suit: '#c8102e', side: '#1d4fa8', arm: '#c8102e', gloves: '#c8102e', legs: '#1d4fa8', boots: '#c8102e',
+      face(x, by) {
+        R(x - 1, by - 42, 1, 14, 'rgba(0,0,0,.3)'); R(x - 7, by - 34, 14, 1, 'rgba(0,0,0,.3)');
+        R(x - 7, by - 39, 5, 5, '#000'); R(x - 6, by - 38, 3, 3, '#fff');
+        R(x, by - 39, 5, 5, '#000'); R(x + 1, by - 38, 3, 3, '#fff');
+      },
+      backHead(x, by) { R(x - 1, by - 42, 1, 14, 'rgba(0,0,0,.3)'); R(x - 7, by - 35, 14, 1, 'rgba(0,0,0,.3)'); },
+      chest(x, by) { R(x - 1, by - 25, 2, 5, '#111'); R(x - 3, by - 24, 6, 1, '#111'); R(x - 3, by - 22, 6, 1, '#111'); R(x - 7, by - 20, 14, 1, 'rgba(0,0,0,.25)'); },
+    },
+    deadpool: {
+      mask: '#b3121a', suit: '#b3121a', side: '#1a1a1a', arm: '#b3121a', gloves: '#1a1a1a', legs: '#b3121a', boots: '#1a1a1a',
+      behind(x, by) { R(x - 8, by - 36, 2, 10, '#222'); R(x + 6, by - 36, 2, 10, '#222'); R(x - 8, by - 37, 2, 2, '#b0b0b0'); R(x + 6, by - 37, 2, 2, '#b0b0b0'); },
+      face(x, by) {
+        R(x - 7, by - 40, 6, 6, '#111'); R(x + 1, by - 40, 6, 6, '#111');
+        R(x - 5, by - 38, 3, 2, '#fff'); R(x + 2, by - 38, 3, 2, '#fff');
+      },
+      chest(x, by) { R(x - 7, by - 15, 14, 2, '#2a2a2a'); R(x - 1, by - 16, 3, 3, '#e8c13a'); R(x - 6, by - 26, 2, 10, 'rgba(0,0,0,.25)'); },
+      over(x, by) { R(x - 6, by - 36, 2, 20, '#3a3a3a'); R(x + 4, by - 36, 2, 20, '#3a3a3a'); R(x - 7, by - 37, 4, 3, '#222'); R(x + 3, by - 37, 4, 3, '#222'); },
+    },
+    venom: {
+      mask: '#141418', suit: '#141418', side: '#22304a', arm: '#141418', gloves: '#141418', legs: '#141418', boots: '#141418',
+      face(x, by) {
+        R(x - 7, by - 40, 5, 3, '#fff'); R(x - 6, by - 37, 3, 2, '#fff');
+        R(x + 2, by - 40, 5, 3, '#fff'); R(x + 3, by - 37, 3, 2, '#fff');
+        R(x - 6, by - 33, 12, 3, '#fff');
+        [-5, -3, -1, 1, 3].forEach(i => R(x + i, by - 33, 1, 3, '#000'));
+        R(x - 1, by - 30, 3, 3, '#c2185b');
+        R(x - 7, by - 42, 1, 6, '#2b3a5c');
+      },
+      backHead(x, by) { R(x - 7, by - 42, 2, 8, '#2b3a5c'); },
+      chest(x, by) {
+        R(x - 1, by - 27, 2, 11, '#fff'); R(x - 7, by - 26, 14, 1, '#fff');
+        R(x - 6, by - 23, 5, 1, '#fff'); R(x + 1, by - 23, 5, 1, '#fff'); R(x - 5, by - 20, 4, 1, '#fff'); R(x + 1, by - 20, 4, 1, '#fff');
+      },
+    },
+    batman: {
+      mask: '#1c1c22', suit: '#5a606b', side: '#4a4f59', arm: '#5a606b', gloves: '#1c1c22', legs: '#4a4f59', boots: '#1c1c22', cape: '#1c1c22',
+      behind(x, by, sit) { R(x - 10, by - 29, 20, sit ? 24 : 27, O); R(x - 9, by - 28, 18, sit ? 22 : 25, '#1c1c22'); },
+      top(x, by) { R(x - 8, by - 48, 4, 6, O); R(x + 4, by - 48, 4, 6, O); R(x - 7, by - 47, 2, 5, '#1c1c22'); R(x + 5, by - 47, 2, 5, '#1c1c22'); },
+      face(x, by) {
+        R(x - 6, by - 33, 12, 5, '#d9a37a'); R(x - 3, by - 31, 4, 1, '#7a3b2a');
+        R(x - 6, by - 38, 4, 1, '#fff'); R(x + 1, by - 38, 4, 1, '#fff');
+      },
+      chest(x, by) {
+        R(x - 4, by - 25, 8, 4, '#e8c13a'); R(x - 3, by - 24, 6, 2, '#111'); R(x - 1, by - 25, 2, 1, '#111');
+        R(x - 7, by - 15, 14, 2, '#e8c13a');
+      },
+      over(x, by, sit) { R(x - 9, by - 29, 18, sit ? 25 : 28, O); R(x - 8, by - 28, 16, sit ? 23 : 26, '#1c1c22'); R(x - 6, by - 28, 1, 20, '#2b2b33'); R(x + 3, by - 28, 1, 20, '#2b2b33'); },
+    },
   };
+
+  const PEOPLE = {
+    gestor:   { name: 'Homem-Aranha', role: 'Gestor de Tráfego', emoji: '🕷️', look: LOOKS.spider,   seat: { x: 2.5,  y: 2.5, face: 'SW', h: 8 }, desk: [1, 3] },
+    copy:     { name: 'Deadpool',     role: 'Copywriter',        emoji: '⚔️', look: LOOKS.deadpool, seat: { x: 6.5,  y: 2.5, face: 'SW', h: 8 }, desk: [5, 3] },
+    analista: { name: 'Venom',        role: 'Analista de Dados', emoji: '🖤', look: LOOKS.venom,    seat: { x: 10.5, y: 2.5, face: 'SW', h: 8 }, desk: [9, 3] },
+    gerente:  { name: 'Batman',       role: 'Gerente',           emoji: '🦇', look: LOOKS.batman,   seat: { x: 2.5,  y: 8.5, face: 'SW', h: 8 }, desk: [1, 9] },
+  };
+  const WORKERS = ['gestor', 'copy', 'analista'];
   for (const id in PEOPLE) {
     const p = PEOPLE[id];
-    p.id = id; p.seat = { x: p.at[0], y: p.at[1] }; p.pos = { ...p.seat };
-    p.walking = false; p.back = false;
+    Object.assign(p, { id, pos: { x: p.seat.x, y: p.seat.y }, path: [], goal: null, face: 'SW',
+      sitAt: { h: p.seat.h, face: 'SW' }, timer: 3000 + Math.random() * 9000, home: true, paused: false });
   }
-  const isSeated = p => !p.walking && p.pos.x === p.seat.x && p.pos.y === p.seat.y;
+  const label = p => `${p.emoji} ${p.name} · ${p.role}`;
 
-  const TVS = CAMPAIGNS.map((c, i) => ({ c, start: .6 + i * 4, w: 56, h: 44, top: 84 }));
+  // ---------- Mapa de obstáculos e caminhos ----------
+  const cost = new Array(GX * GY).fill(1);
+  const ix = (x, y) => y * GX + x;
+  function block(gx, gy, w, d, c = Infinity) {
+    for (let y = Math.floor(gy); y < Math.ceil(gy + d - 1e-6); y++)
+      for (let x = Math.floor(gx); x < Math.ceil(gx + w - 1e-6); x++)
+        if (x >= 0 && y >= 0 && x < GX && y < GY) cost[ix(x, y)] = c;
+  }
+  const walkable = (x, y) => x >= 0 && y >= 0 && x < GX && y < GY && isFinite(cost[ix(x, y)]);
 
-  let hover = null, hoverTile = null, regions = [];
+  function findPath(sx, sy, tx, ty) {
+    const n = GX * GY, dist = new Array(n).fill(Infinity), prev = new Array(n).fill(-1), done = new Array(n).fill(false);
+    const start = ix(sx, sy), goal = ix(tx, ty);
+    dist[start] = 0;
+    for (;;) {
+      let u = -1, best = Infinity;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < best) { best = dist[i]; u = i; }
+      if (u < 0 || u === goal) break;
+      done[u] = true;
+      const ux = u % GX, uy = (u / GX) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const vx = ux + dx, vy = uy + dy;
+        if (!walkable(vx, vy)) continue;
+        if (dx && dy && (!walkable(ux + dx, uy) || !walkable(ux, uy + dy))) continue;   // sem cortar quina
+        const v = ix(vx, vy), c = (v === goal ? 1 : cost[v]) * (dx && dy ? 1.42 : 1);
+        if (dist[u] + c < dist[v]) { dist[v] = dist[u] + c; prev[v] = u; }
+      }
+    }
+    if (!isFinite(dist[goal])) return null;
+    const out = [];
+    for (let v = goal; v !== start; v = prev[v]) out.unshift({ x: v % GX + .5, y: ((v / GX) | 0) + .5 });
+    return out;
+  }
+
+  // ---------- Móveis (posição, obstáculo e desenho) ----------
+  const furniture = [];   // { fp: [x0, y0, x1, y1], layer, draw }
+  const put = (fp, draw, layer = 0) => furniture.push({ fp, draw, layer });
+
+  const WHITE = ['#f3f3f0', '#c9c9c4', '#dcdcd7'], BLACK = ['#2a2a30', '#17171b', '#202026'], GOLD = ['#e3c46a', '#a88a35', '#c4a44c'];
+
+  function addDesk(p) {
+    const [gx, gy] = p.desk;
+    block(gx, gy, 3, 1);
+    put([gx, gy, gx + 3, gy + 1], () => {
+      const hot = hover === p;
+      box(gx + .08, gy + .1, .12, .8, 14, BLACK); box(gx + 2.8, gy + .1, .12, .8, 14, BLACK);
+      box(gx + .2, gy + .05, 2.6, .12, 9, BLACK, 5);
+      box(gx, gy, 3, 1, 2.5, hot ? ['#fff7c2', '#d6cf9e', '#ebe4b0'] : WHITE, 14);
+      // Dois monitores (de costas, com luz do LED da tela)
+      for (const mx of [.9, 1.65]) {
+        glow('#4fc3ff', 6, () => box(gx + mx, gy + .22, .65, .08, 12, ['#3a3a40', '#222228', '#2c2c32'], 18));
+        box(gx + mx + .27, gy + .3, .1, .12, 2, BLACK, 16.5);
+      }
+      box(gx + .3, gy + .45, .4, .35, .8, ['#ffffff', '#ddd', '#eee'], 16.5);
+      box(gx + 2.5, gy + .55, .14, .14, 3.5, p.id === 'gerente' ? GOLD : ['#c8102e', '#8c0b20', '#a50d26'], 16.5);
+      const [x0] = iso(gx, gy + 1), [x1] = iso(gx + 3, gy), [, yT] = iso(gx, gy, 34), [, yB] = iso(gx + 3, gy + 1);
+      regions.push({ x: x0, y: yT, w: x1 - x0, h: yB - yT, target: p });
+    });
+  }
+  // Cadeira: assento + encosto do lado oposto ao rosto de quem senta.
+  function addChair(x, y, face, col = ['#3d4354', '#2b2f3b', '#343947'], h = 8) {
+    block(x - .5, y - .5, 1, 1, 6);
+    put([x - .3, y - .3, x + .3, y + .3], () => { box(x - .05, y - .05, .1, .1, h - 3, BLACK); box(x - .3, y - .3, .6, .6, 3, col, h - 3); });
+    const B = { SW: [x - .3, y - .4, .6, .12], NE: [x - .3, y + .28, .6, .12], SE: [x - .4, y - .3, .12, .6], NW: [x + .28, y - .3, .12, .6] }[face];
+    put([B[0], B[1], B[0] + B[2], B[1] + B[3]], () => box(B[0], B[1], B[2], B[3], 13, col, h), face === 'NE' || face === 'NW' ? 2 : 0);
+  }
+  function addPlant(gx, gy, big = false) {
+    block(gx, gy, .5, .5);
+    put([gx, gy, gx + .5, gy + .5], () => {
+      box(gx, gy, .5, .5, big ? 12 : 9, ['#e8e2d4', '#b9b2a2', '#cfc8b8']);
+      const [x, y] = iso(gx + .25, gy + .25, big ? 12 : 9);
+      const leaves = big
+        ? [[0, -26, 6, '#2f8f3f'], [-6, -18, 7, '#3aa84c'], [6, -19, 7, '#2f8f3f'], [0, -12, 8, '#45b957'], [-4, -32, 5, '#45b957'], [5, -30, 5, '#3aa84c'], [-7, -8, 5, '#2f8f3f']]
+        : [[0, -14, 7, '#2f8f3f'], [-6, -8, 6, '#3aa84c'], [6, -9, 6, '#2f8f3f'], [0, -6, 7, '#45b957'], [-3, -19, 5, '#45b957']];
+      leaves.forEach(([dx, dy, r, c]) => { ctx.beginPath(); ctx.fillStyle = c; ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .6; ctx.stroke(); });
+    });
+  }
+
+  // Mesas de trabalho e cadeiras
+  for (const id in PEOPLE) { const p = PEOPLE[id]; addDesk(p); addChair(p.seat.x, p.seat.y, 'SW', id === 'gerente' ? ['#5a2a2a', '#3c1b1b', '#4a2222'] : undefined); }
+
+  // Lounge: sofá de frente para o painel geral, mesa de centro e poltrona
+  block(13, 4, 4, 1, 6);
+  put([13, 4, 17, 4.75], () => {
+    const C = ['#6c3fb5', '#4b2a80', '#5a339b'];
+    box(13, 4, 4, .75, 6, C);
+    box(13, 4, .2, .75, 11, C, 0); box(16.8, 4, .2, .75, 11, C, 0);
+    for (let i = 0; i < 4; i++) box(13.25 + i * .9, 4.05, .85, .65, 2, ['#7d4fc9', '#5a339b', '#6c3fb5'], 6);
+  });
+  put([13, 4.75, 17, 5], () => box(13, 4.75, 4, .25, 15, ['#7d4fc9', '#4b2a80', '#5a339b']), 2);
+  block(14, 2.2, 2, .75);
+  put([14, 2.2, 16, 2.95], () => { box(14.9, 2.5, .2, .2, 5, GOLD); box(14, 2.2, 2, .75, 1.5, ['#1e1e24', '#0f0f13', '#17171c'], 5); box(14.3, 2.4, .3, .2, 2.5, ['#ffffff', '#ccc', '#ddd'], 6.5); box(15.3, 2.45, .25, .25, 3, GOLD, 6.5); });
+  addChair(12.5, 2.5, 'SE', ['#c9a85a', '#8f7535', '#a88a45'], 7);
+  // Luminária de chão
+  block(17.3, 5.4, .4, .4);
+  put([17.3, 5.4, 17.7, 5.8], () => {
+    box(17.4, 5.5, .2, .2, 1, GOLD); box(17.47, 5.57, .06, .06, 40, GOLD, 1);
+    glow('#ffd77a', 14, () => box(17.3, 5.4, .4, .4, 8, ['#fff1c9', '#e6cf8f', '#f0dca6'], 40));
+  });
+
+  // Sala de reunião: mesa de vidro + 6 cadeiras
+  block(7, 7, 3, 2);
+  put([7, 7, 10, 9], () => {
+    box(8.4, 7.9, .2, .2, 10, BLACK);
+    box(7, 7, 3, 2, 1.5, ['rgba(170,215,240,.75)', 'rgba(120,170,200,.8)', 'rgba(140,190,215,.8)'], 10, 'rgba(255,255,255,.5)');
+    box(7.6, 7.5, .5, .35, .5, ['#ffffff', '#ddd', '#eee'], 11.5); box(9, 8.2, .3, .3, 1, BLACK, 11.5);
+  });
+  const MEETING = [[6.5, 7.5, 'SE'], [6.5, 8.5, 'SE'], [10.5, 7.5, 'NW'], [10.5, 8.5, 'NW'], [8.5, 6.5, 'SW'], [8.5, 9.5, 'NE']];
+  MEETING.forEach(([x, y, f]) => addChair(x, y, f));
+
+  // Café: balcão, máquina e banqueta
+  block(15, 9, 2.6, .8);
+  put([15, 9, 17.6, 9.8], () => {
+    box(15, 9, 2.6, .8, 15, ['#2a2a30', '#17171b', '#202026']);
+    box(15, 9, 2.6, .8, 1.5, ['#e9e4d8', '#bcb5a5', '#d2cbbb'], 15);
+    box(15.3, 9.2, .45, .4, 8, ['#555', '#333', '#444'], 16.5); box(15.42, 9.45, .2, .12, 2, ['#d03b3b', '#a02a2a', '#b83030'], 19);
+    box(16.4, 9.3, .14, .14, 3, WHITE, 16.5); box(16.7, 9.3, .14, .14, 3, WHITE, 16.5);
+    glow('#ffb347', 8, () => { const [a, b] = iso(15, 9.8, 2), [c, d] = iso(17.6, 9.8, 2); ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); });
+  });
+  addChair(16.5, 10.5, 'NE', ['#c9a85a', '#8f7535', '#a88a45'], 9);
+
+  // Bebedouro, armário de troféus, plantas
+  block(17.2, 7.2, .5, .5);
+  put([17.2, 7.2, 17.7, 7.7], () => { box(17.2, 7.2, .5, .5, 22, ['#e9eef2', '#bfc8d0', '#d3dbe2']); box(17.28, 7.28, .34, .34, 12, ['#a6dcff', '#5fb7f2', '#7cc8fb'], 22); });
+  block(0, 6.6, .55, 1.8);
+  put([0, 6.6, .55, 8.4], () => {
+    box(0, 6.6, .55, 1.8, 22, ['#2a2a30', '#17171b', '#202026']);
+    box(.1, 6.9, .2, .2, 5, GOLD, 22); box(.1, 7.5, .18, .18, 7, GOLD, 22); box(.1, 8, .2, .2, 4, ['#c0c0c0', '#8a8a8a', '#a5a5a5'], 22);
+  });
+  addPlant(.1, .1, true); addPlant(17.3, 12.9, true); addPlant(.1, 13.4, true); addPlant(4.4, 9.25); addPlant(12.25, .1);
+
+  // ---------- Pontos de interesse (para onde os personagens vão) ----------
+  const POIS = [
+    { x: 15.5, y: 10.5, face: 'NE', say: ['☕ Pausa pro café.', 'Café sem açúcar, igual meu CPL: enxuto.'] },
+    { x: 16.5, y: 10.5, face: 'NE', sit: 9, say: ['Esse balcão é chique demais.'] },
+    { x: 16.5, y: 7.5, face: 'SE', say: ['Hidratação em dia!'] },
+    { x: 0.5, y: 12.5, face: 'NW', say: ['Que vista linda da cidade.', 'Olhando o mercado lá fora...'] },
+    { x: 13.5, y: 4.5, face: 'NE', sit: 7, say: ['Painel geral no telão!'] },
+    { x: 14.5, y: 4.5, face: 'NE', sit: 7, say: ['Sofá + dashboard = felicidade.'] },
+    { x: 15.5, y: 4.5, face: 'NE', sit: 7 },
+    { x: 16.5, y: 4.5, face: 'NE', sit: 7 },
+    { x: 12.5, y: 2.5, face: 'SE', sit: 7, say: ['Poltrona de chefe.'] },
+    ...MEETING.map(([x, y, face]) => ({ x, y, face, sit: 8 })),
+  ];
+  const deskFront = id => ({ x: PEOPLE[id].seat.x, y: id === 'gerente' ? 10.5 : 4.5, face: 'NE' });
+
+  // ---------- Movimentação ----------
+  const faceFrom = (dx, dy) => Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'SE' : 'NW') : (dy > 0 ? 'SW' : 'NE');
+  const tileOf = p => [Math.min(GX - 1, Math.max(0, Math.floor(p.pos.x))), Math.min(GY - 1, Math.max(0, Math.floor(p.pos.y)))];
+  const taken = new Set();
+  const keyOf = g => g.x + ',' + g.y;
+
+  function goTo(p, goal) {
+    const [sx, sy] = tileOf(p);
+    const path = findPath(sx, sy, Math.floor(goal.x), Math.floor(goal.y));
+    if (!path) { p.timer = 1500; return false; }
+    if (p.goal) taken.delete(keyOf(p.goal));
+    taken.add(keyOf(goal));
+    p.goal = goal; p.path = path; p.sitAt = null; p.home = false;
+    if (path.length) { const last = path[path.length - 1]; last.x = goal.x; last.y = goal.y; }
+    else arrive(p);
+    return true;
+  }
+  function goHome(p, extra = {}) { goTo(p, { x: p.seat.x, y: p.seat.y, face: p.seat.face, sit: p.seat.h, home: true, dwell: 9000 + Math.random() * 10000, ...extra }); }
+
+  function arrive(p) {
+    const g = p.goal;
+    p.pos = { x: g.x, y: g.y };
+    p.sitAt = g.sit ? { h: g.sit, face: g.face } : null;
+    p.face = g.face || p.face;
+    p.home = !!g.home;
+    p.timer = g.dwell != null ? g.dwell : 4000 + Math.random() * 5000;
+    if (g.say && Math.random() < .6) say(p, g.say[Math.floor(Math.random() * g.say.length)]);
+    if (g.onArrive) g.onArrive();
+  }
+
+  function decide(p) {
+    if (p.id === 'gerente' && tour) return tourNext();
+    if (p.paused) { p.timer = 600; return; }
+    if (!p.home) return goHome(p);
+    // Sai da mesa para um ponto livre (ou visita um colega)
+    if (Math.random() < .25) {
+      const others = Object.keys(PEOPLE).filter(id => id !== p.id);
+      const id = others[Math.floor(Math.random() * others.length)];
+      const g = deskFront(id);
+      if (!taken.has(keyOf(g))) return goTo(p, { ...g, say: [`E aí, ${PEOPLE[id].name}, como tá aí?`] });
+    }
+    const free = POIS.filter(g => !taken.has(keyOf(g)));
+    const g = free[Math.floor(Math.random() * free.length)];
+    if (g) goTo(p, { ...g }); else p.timer = 2000;
+  }
+
+  function step(p, dt) {
+    if (p.path.length) {
+      const n = p.path[0], dx = n.x - p.pos.x, dy = n.y - p.pos.y, d = Math.hypot(dx, dy), sp = .0022 * dt;
+      p.face = faceFrom(dx, dy);
+      if (d <= sp) { p.pos.x = n.x; p.pos.y = n.y; p.path.shift(); if (!p.path.length) arrive(p); }
+      else { p.pos.x += dx / d * sp; p.pos.y += dy / d * sp; }
+      return;
+    }
+    p.timer -= dt;
+    if (p.timer <= 0) decide(p);
+  }
+
+  // ---------- Ronda do Batman ----------
+  let tour = null;
+  const REPLIES = {
+    gestor: () => `Investimos ${brl0.format(total().spend)} em 7 dias, chefe.`,
+    copy: () => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `Melhor CTR: ${b.ad.name} (${pct(b.ad.m.ctr)}). De nada.`; },
+    analista: () => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `NÓS achamos a melhor: ${b.short}, CPL ${brl0.format(b.m.cpl)}.`; },
+  };
+  function startTour() {
+    if (tour) return;
+    tour = { queue: [...WORKERS] };
+    WORKERS.forEach(id => PEOPLE[id].paused = true);
+    const g = PEOPLE.gerente;
+    say(g, 'Equipe. Relatório. Agora.');
+    tourNext();
+  }
+  function tourNext() {
+    const g = PEOPLE.gerente;
+    if (!tour.queue.length) {
+      goHome(g, { dwell: 12000, onArrive: () => { tour = null; WORKERS.forEach(id => PEOPLE[id].paused = false); openGerente(); } });
+      return;
+    }
+    const id = tour.queue.shift(), w = PEOPLE[id];
+    const ref = w.path.length ? w.path[w.path.length - 1] : w.pos;
+    const tx = Math.floor(ref.x), ty = Math.floor(ref.y), [gx, gy] = tileOf(g);
+    let best = null;
+    for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const nx = tx + dx, ny = ty + dy;
+      if (!walkable(nx, ny) || cost[ix(nx, ny)] > 1) continue;
+      const d = Math.hypot(nx - gx, ny - gy) + (dy < 0 ? 3 : 0);
+      if (!best || d < best.d) best = { x: nx + .5, y: ny + .5, d };
+    }
+    if (!best) return tourNext();
+    goTo(g, { x: best.x, y: best.y, face: faceFrom(ref.x - best.x, ref.y - best.y), dwell: 1400, onArrive: () => say(w, REPLIES[id]()) });
+  }
+
+  // ---------- Conversa espontânea ----------
+  const CHATTER = [
+    () => [PEOPLE.gestor, 'Com grandes orçamentos vêm grandes responsabilidades.'],
+    () => [PEOPLE.analista, (() => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `NÓS somos dados. ${b.short} é a melhor: CPL ${brl0.format(b.m.cpl)}`; })()],
+    () => [PEOPLE.copy, 'Escrevi uma copy tão boa que até eu cliquei.'],
+    () => [PEOPLE.gerente, `Meta de CPL: abaixo de ${brl0.format(metaCPL)}. Sem exceções.`],
+    () => [PEOPLE.gestor, (() => { const w = [...CAMPAIGNS].sort((a, z) => z.m.cpl - a.m.cpl)[0]; return statusOf(w.m.cpl) === 'critical' ? `Meu sentido-aranha diz: ${w.short} tá caro!` : 'Todas as campanhas rodando.'; })()],
+    () => [PEOPLE.copy, (() => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `"${b.ad.headline}"? Obra-prima. Minha.`; })()],
+    () => [PEOPLE.analista, `Connect rate geral: ${pct(total().connect)}. Delicioso.`],
+    () => [PEOPLE.gerente, 'Eu não sou o CPL que vocês merecem...'],
+    () => [PEOPLE.copy, 'Oi, você aí do outro lado da tela! 👋'],
+  ];
+  let nextChat = 1500, chatIdx = 0;
+
+  // ---------- Balões de chat (pilha no topo, como no Habbo) ----------
+  const chat = [];
+  function say(p, msg) {
+    chat.forEach(m => m.ty -= 17);
+    chat.push({ p, msg, y: 86, ty: 70, born: performance.now() });
+  }
+  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function drawChat(t) {
+    for (let i = chat.length - 1; i >= 0; i--) if (chat[i].ty < -20 || t - chat[i].born > 14000) chat.splice(i, 1);
+    for (const m of chat) {
+      m.y += (m.ty - m.y) * .18;
+      const name = m.p.name + ': ';
+      ctx.font = `700 7px ${FONT}`; const nw = ctx.measureText(name).width;
+      ctx.font = `400 7px ${FONT}`; const mw = ctx.measureText(m.msg).width;
+      const w = nw + mw + 22, h = 14, [px] = iso(m.p.pos.x, m.p.pos.y);
+      const x = Math.max(4, Math.min(W - w - 4, px - w / 2)), y = Math.round(m.y);
+      const age = t - m.born; ctx.globalAlpha = age > 12000 ? Math.max(0, 1 - (age - 12000) / 2000) : 1;
+      ctx.fillStyle = '#000'; roundRect(x - 1, y - 1, w + 2, h + 2, 5); ctx.fill();
+      ctx.fillStyle = '#fff'; roundRect(x, y, w, h, 4); ctx.fill();
+      const tx = Math.max(x + 8, Math.min(x + w - 8, px));
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.moveTo(tx - 4, y + h); ctx.lineTo(tx, y + h + 4); ctx.lineTo(tx + 4, y + h); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(tx - 3, y + h - 1); ctx.lineTo(tx, y + h + 2.5); ctx.lineTo(tx + 3, y + h - 1); ctx.fill();
+      R(x + 3, y + 3, 8, 8, '#000'); R(x + 4, y + 4, 6, 6, m.p.look.mask);
+      R(x + 5, y + 6, 2, 2, '#fff'); R(x + 8, y + 6, 1, 2, '#fff');
+      text(name, x + 14, y + 3.5, 7, '#111', 700);
+      text(m.msg, x + 14 + nw, y + 3.5, 7, '#111', 400);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Avatar estilo Habbo ----------
+  function avatar(p, t) {
+    const L = p.look, sit = p.path.length ? null : p.sitAt;
+    const back = p.face === 'NE' || p.face === 'NW', mirror = p.face === 'SE' || p.face === 'NW';
+    let [x, y] = iso(p.pos.x, p.pos.y); x = Math.round(x); y = Math.round(y);
+    const stepF = p.path.length ? (Math.floor(t / 150) % 2 ? 1 : -1) : 0;
+    if (!sit) { ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x, y, 9, 4, 0, 0, Math.PI * 2); ctx.fill(); }
+    const by = sit ? y - sit.h - 3 : y;
+    ctx.save();
+    if (mirror) { ctx.translate(2 * x, 0); ctx.scale(-1, 1); }
+    if (L.behind && !back) L.behind(x, by, sit);
+    if (!sit) {
+      R(x - 6, by - 14, 12, 12, O);
+      R(x - 5, by - 13 + Math.max(0, stepF), 4, 11 - Math.max(0, stepF), L.legs);
+      R(x + 1, by - 13 + Math.max(0, -stepF), 4, 11 - Math.max(0, -stepF), L.legs);
+      R(x - 6, by - 4 - Math.max(0, -stepF), 5, 4, L.boots); R(x + 1, by - 4 - Math.max(0, stepF), 5, 4, L.boots);
+    } else if (!back) { R(x - 6, by - 4, 12, 5, O); R(x - 5, by - 3, 10, 3, L.legs); }
+    // Tronco
+    R(x - 8, by - 28, 16, 16, O);
+    R(x - 7, by - 27, 14, 14, L.suit);
+    R(x - 7, by - 27, 2, 14, L.side); R(x + 5, by - 27, 2, 14, L.side);
+    if (!back && L.chest) L.chest(x, by);
+    // Braços (digitando na própria mesa)
+    const typing = sit && p.home && !back && p.id !== 'gerente' ? Math.floor(t / 170 + p.seat.x) % 2 : 0;
+    R(x - 10, by - 27, 4, 12, O); R(x + 6, by - 27, 4, 12, O);
+    R(x - 9, by - 26, 2, 9, L.arm); R(x + 7, by - 26, 2, 9, L.arm);
+    R(x - 9, by - 17 - typing, 2, 3, L.gloves); R(x + 7, by - 17 - (sit && p.home && p.id !== 'gerente' ? 1 - typing : 0), 2, 3, L.gloves);
+    // Cabeça grande
+    R(x - 8, by - 43, 16, 16, O);
+    R(x - 7, by - 42, 14, 14, L.mask);
+    R(x - 7, by - 30, 14, 2, 'rgba(0,0,0,.18)');
+    if (back) { if (L.backHead) L.backHead(x, by); } else L.face(x, by, t);
+    if (L.top) L.top(x, by);
+    if (back && L.over) L.over(x, by, sit);
+    ctx.restore();
+    // Etiqueta com o nome
+    ctx.font = `600 6px ${FONT}`;
+    const tw = ctx.measureText(p.name).width + 8, hot = hover === p;
+    R(x - tw / 2, by - 58, tw, 9, hot ? '#ffe066' : 'rgba(0,0,0,.7)');
+    text(p.name, x, by - 57, 6, hot ? '#111' : '#fff', 600, 'center');
+    regions.push({ x: x - 11, y: by - 59, w: 22, h: (sit ? 50 : 60), target: p });
+  }
 
   // ---------- Sala ----------
-  function drawRoom() {
-    // Paredes com espessura (camada de trás)
-    poly([iso(0, GY, 0), iso(0, 0, 0), iso(0, 0, WALL), iso(0, GY, WALL)].map(([x, y]) => [x - 5, y - 3]), '#5d6b72');
-    poly([iso(0, 0, 0), iso(GX, 0, 0), iso(GX, 0, WALL), iso(0, 0, WALL)].map(([x, y]) => [x + 5, y - 3]), '#4e5b62');
-    // Parede esquerda e direita
-    poly([iso(0, GY, 0), iso(0, 0, 0), iso(0, 0, WALL), iso(0, GY, WALL)], '#b9c7cd');
-    poly([iso(0, 0, 0), iso(GX, 0, 0), iso(GX, 0, WALL), iso(0, 0, WALL)], '#9fb0b8');
-    // Faixas e rodapé
-    for (let i = 1; i < GY; i++) poly([iso(0, i, 4), iso(0, i, WALL), iso(0, i - .03, WALL), iso(0, i - .03, 4)], 'rgba(0,0,0,.05)');
-    for (let i = 1; i < GX; i++) poly([iso(i, 0, 4), iso(i, 0, WALL), iso(i + .03, 0, WALL), iso(i + .03, 0, 4)], 'rgba(0,0,0,.05)');
-    poly([iso(0, GY, 0), iso(0, 0, 0), iso(0, 0, 5), iso(0, GY, 5)], '#6e7c83');
-    poly([iso(0, 0, 0), iso(GX, 0, 0), iso(GX, 0, 5), iso(0, 0, 5)], '#5f6c73');
-    // Topo da parede
-    poly([iso(0, GY, WALL), iso(0, 0, WALL), [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3], [iso(0, GY, WALL)[0] - 5, iso(0, GY, WALL)[1] - 3]], '#dfe8eb');
-    poly([iso(0, 0, WALL), iso(GX, 0, WALL), [iso(GX, 0, WALL)[0] + 5, iso(GX, 0, WALL)[1] - 3], [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3]], '#cfdade');
+  const TVS = CAMPAIGNS.map((c, i) => ({ c, start: .8 + i * 4, w: 56, h: 44, top: 88 }));
+  const BIG = { big: true, start: 12.75, w: 76, h: 54, top: 94 };
+  let hover = null, hoverTile = null, regions = [];
 
-    // Piso: espessura e tacos de madeira
-    poly([iso(0, GY), iso(GX, GY), [iso(GX, GY)[0], iso(GX, GY)[1] + 7], [iso(0, GY)[0], iso(0, GY)[1] + 7]], '#5e3f22');
-    poly([iso(GX, 0), iso(GX, GY), [iso(GX, GY)[0], iso(GX, GY)[1] + 7], [iso(GX, 0)[0], iso(GX, 0)[1] + 7]], '#7a5330');
-    for (let gy = 0; gy < GY; gy++) for (let gx = 0; gx < GX; gx++) {
-      poly([iso(gx, gy), iso(gx + 1, gy), iso(gx + 1, gy + 1), iso(gx, gy + 1)], (gx + gy) % 2 ? '#b2834f' : '#a97a48', 'rgba(70,40,15,.45)');
-    }
-    // Tapete
-    poly([iso(3.3, 4.9), iso(8.7, 4.9), iso(8.7, 9.3), iso(3.3, 9.3)], '#5b2f5c');
-    poly([iso(3.6, 5.2), iso(8.4, 5.2), iso(8.4, 9), iso(3.6, 9)], '#7c4a7e');
-    poly([iso(4.1, 5.7), iso(7.9, 5.7), iso(7.9, 8.5), iso(4.1, 8.5)], null, 'rgba(255,220,150,.5)');
+  // Prédios da vista (fixos)
+  const city = (() => { const r = rng(7); return Array.from({ length: 9 }, (_, i) => ({ x: i * 7 - 2, w: 6 + r() * 3, h: 12 + r() * 26, lit: Array.from({ length: 12 }, () => r() > .55) })); })();
+  function windowView(w, h) {
+    const hr = new Date().getHours(), night = hr < 6 || hr >= 18;
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, night ? '#0b1030' : '#6cc2ff'); g.addColorStop(1, night ? '#2b2f6b' : '#d6f0ff');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    if (night) { R(w * .75, 5, 4, 4, '#f4f1d0'); [[8, 6], [20, 3], [33, 9], [44, 4]].forEach(([a, b]) => R(a, b, 1, 1, '#fff')); }
+    else { R(w * .72, 5, 6, 6, '#fff3a6'); R(8, 8, 12, 3, '#fff'); R(28, 12, 10, 3, '#fff'); }
+    city.forEach(b => {
+      if (b.x > w) return;
+      const bw = Math.min(b.w, w - b.x), y0 = h - b.h;
+      R(b.x, y0, bw, b.h, night ? '#161b36' : '#7d8fa6');
+      b.lit.forEach((on, i) => { const wx = b.x + 1 + (i % 2) * 3, wy = y0 + 2 + Math.floor(i / 2) * 4; if (wx + 1 < b.x + bw && wy < h - 1) R(wx, wy, 1.5, 2, night ? (on ? '#ffd86b' : '#262c50') : (on ? '#cfe3f5' : '#61738a')); });
+    });
+  }
+  function windowFrame(w, h) { R(-3, -3, w + 6, h + 6, '#c9a85a'); R(-2, -2, w + 4, h + 4, '#1a1f33'); ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip(); windowView(w, h); ctx.restore(); R(w / 2 - 1, 0, 2, h, '#1a1f33'); R(-4, h + 3, w + 8, 3, '#c9a85a'); }
+
+  function drawRoom(t) {
+    const L0 = iso(0, GY, 0), L1 = iso(0, 0, 0), R1 = iso(GX, 0, 0), F = iso(GX, GY, 0);
+    // Paredes com espessura
+    poly([L0, L1, iso(0, 0, WALL), iso(0, GY, WALL)].map(([x, y]) => [x - 6, y - 3]), '#151a2a');
+    poly([L1, R1, iso(GX, 0, WALL), iso(0, 0, WALL)].map(([x, y]) => [x + 6, y - 3]), '#11162a');
+    poly([L0, L1, iso(0, 0, WALL), iso(0, GY, WALL)], '#2b3350');
+    poly([L1, R1, iso(GX, 0, WALL), iso(0, 0, WALL)], '#242b45');
+    // Lambri (parte de baixo) com friso dourado
+    poly([L0, L1, iso(0, 0, 30), iso(0, GY, 30)], '#323b5c');
+    poly([L1, R1, iso(GX, 0, 30), iso(0, 0, 30)], '#2b3352');
+    for (let i = 1; i < GY; i++) poly([iso(0, i, 4), iso(0, i, 28), iso(0, i - .04, 28), iso(0, i - .04, 4)], 'rgba(0,0,0,.18)');
+    for (let i = 1; i < GX; i++) poly([iso(i, 0, 4), iso(i, 0, 28), iso(i + .04, 0, 28), iso(i + .04, 0, 4)], 'rgba(0,0,0,.18)');
+    poly([iso(0, GY, 30), iso(0, 0, 30), iso(0, 0, 32), iso(0, GY, 32)], '#c9a85a');
+    poly([iso(0, 0, 30), iso(GX, 0, 30), iso(GX, 0, 32), iso(0, 0, 32)], '#b39446');
+    poly([L0, L1, iso(0, 0, 4), iso(0, GY, 4)], '#151a2a');
+    poly([L1, R1, iso(GX, 0, 4), iso(0, 0, 4)], '#11162a');
+    // Topo da parede
+    poly([iso(0, GY, WALL), iso(0, 0, WALL), [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3], [iso(0, GY, WALL)[0] - 6, iso(0, GY, WALL)[1] - 3]], '#3c4566');
+    poly([iso(0, 0, WALL), iso(GX, 0, WALL), [iso(GX, 0, WALL)[0] + 6, iso(GX, 0, WALL)[1] - 3], [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3]], '#353d5c');
+    // Fita de LED no alto das paredes (cor muda com o tempo)
+    const hue = (t / 60) % 360;
+    const led = (a, b, h1, h2) => {
+      const g = ctx.createLinearGradient(a[0], a[1], b[0], b[1]);
+      g.addColorStop(0, `hsl(${h1},90%,62%)`); g.addColorStop(1, `hsl(${h2},90%,62%)`);
+      glow(`hsl(${h1},90%,60%)`, 10, () => { ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); });
+    };
+    led(iso(0, GY, WALL - 6), iso(0, 0, WALL - 6), hue, hue + 50);
+    led(iso(0, 0, WALL - 6), iso(GX, 0, WALL - 6), hue + 50, hue + 100);
+    // LED de rodapé
+    glow('#4fc3ff', 6, () => { ctx.strokeStyle = 'rgba(79,195,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(...iso(0, GY, 5)); ctx.lineTo(...iso(0, 0, 5)); ctx.lineTo(...iso(GX, 0, 5)); ctx.stroke(); });
+
+    // Piso de mármore escuro
+    poly([L0, F, [F[0], F[1] + 8], [L0[0], L0[1] + 8]], '#14151c');
+    poly([R1, F, [F[0], F[1] + 8], [R1[0], R1[1] + 8]], '#1d1f29');
+    for (let gy = 0; gy < GY; gy++) for (let gx = 0; gx < GX; gx++)
+      poly([iso(gx, gy), iso(gx + 1, gy), iso(gx + 1, gy + 1), iso(gx, gy + 1)], (gx + gy) % 2 ? '#3a3d4d' : '#33364a', 'rgba(255,255,255,.05)');
+    // Veios do mármore
+    ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = .8;
+    for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.moveTo(...iso(i * 2, 0)); ctx.lineTo(...iso(i * 2 + 3, GY)); ctx.stroke(); }
+    // Tapetes
+    poly([iso(12.4, 1.6), iso(17.6, 1.6), iso(17.6, 5.6), iso(12.4, 5.6)], '#1b3a4b');
+    poly([iso(12.7, 1.9), iso(17.3, 1.9), iso(17.3, 5.3), iso(12.7, 5.3)], null, 'rgba(201,168,90,.8)');
+    poly([iso(5.7, 5.7), iso(11.3, 5.7), iso(11.3, 10.3), iso(5.7, 10.3)], '#4a2134');
+    poly([iso(6, 6), iso(11, 6), iso(11, 10), iso(6, 10)], null, 'rgba(201,168,90,.8)');
+    poly([iso(.8, 7.9), iso(4.6, 7.9), iso(4.6, 11.2), iso(.8, 11.2)], '#2d2d2d');
 
     // Cursor de tile (como no Habbo)
     if (hoverTile) {
       const [gx, gy] = hoverTile;
-      ctx.lineWidth = 1.2; poly([iso(gx, gy), iso(gx + 1, gy), iso(gx + 1, gy + 1), iso(gx, gy + 1)], 'rgba(255,255,255,.12)');
-      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.stroke();
+      poly([iso(gx, gy), iso(gx + 1, gy), iso(gx + 1, gy + 1), iso(gx, gy + 1)], 'rgba(255,255,255,.12)');
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.stroke();
     }
 
-    // Parede esquerda: janela, quadro de meta e relógio
-    onWall('L', 4.2, 80, () => {
-      R(0, 0, 56, 44, '#5d4630'); R(3, 3, 50, 38, '#8fd3ff');
-      R(3, 26, 50, 15, '#bfe8ff'); R(10, 30, 10, 3, '#fff'); R(30, 14, 12, 3, '#fff');
-      R(27, 3, 2, 38, '#5d4630'); R(3, 21, 50, 2, '#5d4630');
-      R(-2, 43, 60, 3, '#4a3725');
+    // ---- Parede esquerda: janelas, neon, ar-condicionado, quadro e relógio ----
+    onWall('L', 13.4, 84, () => windowFrame(58, 50));
+    onWall('L', 4.9, 70, () => windowFrame(44, 40));
+    // Ar-condicionado com ventinho animado
+    onWall('L', 4.9, 96, () => {
+      R(-1, -1, 46, 17, '#000'); R(0, 0, 44, 15, '#f1f3f5'); R(0, 11, 44, 4, '#d9dde2');
+      for (let i = 0; i < 5; i++) R(4 + i * 7, 12, 5, 1, '#aab1ba');
+      R(36, 3, 5, 3, '#0d1b2a'); text('23°', 38.5, 3.2, 3.5, '#4fc3ff', 700, 'center');
+      R(4, 4, 2, 2, Math.floor(t / 800) % 2 ? '#3ddc84' : '#1f8a50');
+      ctx.strokeStyle = 'rgba(200,235,255,.6)'; ctx.lineWidth = .8;
+      for (let i = 0; i < 3; i++) { const ph = (t / 600 + i / 3) % 1; ctx.globalAlpha = 1 - ph; ctx.beginPath(); ctx.moveTo(8 + i * 12, 17 + ph * 10); ctx.quadraticCurveTo(12 + i * 12, 19 + ph * 10, 16 + i * 12, 17 + ph * 10); ctx.stroke(); }
+      ctx.globalAlpha = 1;
     });
-    const t = total();
-    onWall('L', 8.6, 78, () => {
-      R(0, 0, 50, 40, '#1f1f1f'); R(2, 2, 46, 36, '#fffbea');
-      text('META CPL', 25, 5, 6, '#52514e', 600, 'center');
-      text(brl0.format(metaCPL), 25, 12, 10, '#111', 700, 'center');
-      text(int.format(t.leads) + ' leads · 7d', 25, 27, 5.5, '#52514e', 600, 'center');
+    // Letreiro neon
+    onWall('L', 9.2, 98, () => {
+      R(0, 0, 58, 22, 'rgba(0,0,0,.35)');
+      const flick = Math.sin(t / 90) > -.97;
+      glow('#ff4fd8', flick ? 10 : 2, () => text('TRÁFEGO', 29, 3, 9, flick ? '#ff7be5' : '#7a3a6d', 700, 'center'));
+      glow('#4fe3ff', 10, () => text('PAGO ★ LEADS', 29, 13, 6, '#8ff0ff', 700, 'center'));
     });
-    onWall('L', 6.2, 86, () => {
-      R(0, 0, 16, 16, '#222'); R(2, 2, 12, 12, '#f4f4f4');
+    // Quadro com a meta
+    const tt = total();
+    onWall('L', 9, 66, () => {
+      R(-2, -2, 52, 36, '#c9a85a'); R(0, 0, 48, 32, '#fffbea');
+      text('META CPL', 24, 3, 5.5, '#52514e', 600, 'center');
+      text(brl0.format(metaCPL), 24, 9, 10, '#111', 700, 'center');
+      text(int.format(tt.leads) + ' leads · 7d', 24, 22, 5, '#52514e', 600, 'center');
+    });
+    // Relógio
+    onWall('L', 1.8, 92, () => {
+      R(-1, -1, 18, 18, '#c9a85a'); R(0, 0, 16, 16, '#111'); R(2, 2, 12, 12, '#f4f4f4');
       const now = new Date(), cx = 8, cy = 8;
       ctx.strokeStyle = '#111'; ctx.lineWidth = 1.2;
       const hand = (a, l) => { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(a) * l, cy - Math.cos(a) * l); ctx.stroke(); };
@@ -400,7 +835,7 @@
     const { c, start, w, h, top } = tv;
     const st = statusOf(c.m.cpl), col = STATUS[st].color, hot = hover === tv;
     onWall('R', start, top, () => {
-      R(-1, -1, w + 2, h + 2, hot ? '#ffe066' : '#000');
+      glow(col, 12, () => R(-1, -1, w + 2, h + 2, hot ? '#ffe066' : '#000'));
       R(0, 0, w, h, '#1b1b1b');
       R(2, 2, w - 4, h - 8, '#0d1b2a');
       text(c.short.toUpperCase(), 5, 4, 6, '#c3c2b7', 600);
@@ -414,221 +849,77 @@
       R(2, h - 5, w - 4, 3, col);
     });
     const [x0, y0] = iso(start, 0, top);
-    regions.push({ x: x0, y: y0, w: w, h: h + w / 2, target: tv });
+    regions.push({ x: x0, y: y0, w, h: h + w / 2, target: tv });
   }
 
-  // ---------- Móveis ----------
-  const WOOD = ['#c99b62', '#8f6538', '#a87843'];
-  function drawDesk(p) {
-    const [gx, gy] = p.desk, hot = hover === p;
-    box(gx + .05, gy + .1, .14, .8, 14, ['#7b5530', '#6a4728', '#7b5530']);
-    box(gx + 1.81, gy + .1, .14, .8, 14, ['#7b5530', '#6a4728', '#7b5530']);
-    box(gx, gy, 2, .5, 9, ['#7b5530', '#7b5530', '#6a4728'], 5);
-    box(gx, gy, 2, 1, 2.5, hot ? ['#f0c58a', '#b38452', '#c99b62'] : WOOD, 14);
-    // Monitor (de costas), papéis e caneca
-    box(gx + 1.25, gy + .2, .55, .12, 11, ['#3a3a3a', '#262626', '#303030'], 18);
-    box(gx + 1.45, gy + .3, .15, .15, 2, ['#3a3a3a', '#262626', '#303030'], 16.5);
-    box(gx + .25, gy + .35, .45, .35, .8, ['#ffffff', '#ddd', '#eee'], 16.5);
-    box(gx + .85, gy + .5, .14, .14, 3.5, p.id === 'gerente' ? ['#ffe066', '#c9a93a', '#e0bf47'] : ['#f2f2f2', '#c9c9c9', '#dedede'], 16.5);
-    const [x0] = iso(gx, gy + 1), [x1] = iso(gx + 2, gy), [, yT] = iso(gx, gy, 32), [, yB] = iso(gx + 2, gy + 1);
-    regions.push({ x: x0, y: yT, w: x1 - x0, h: yB - yT, target: p });
-  }
-  function drawChair(p) {
-    const { x, y } = p.seat;
-    box(x - .06, y - .06, .12, .12, 7, ['#222', '#111', '#1a1a1a']);
-    box(x - .3, y - .28, .6, .56, 3, ['#3d4354', '#2b2f3b', '#343947'], 7);
-    box(x - .3, y - .38, .6, .12, 16, ['#3d4354', '#2b2f3b', '#343947'], 9);
-  }
-  function plant(gx, gy) {
-    box(gx, gy, .5, .5, 9, ['#c46a3a', '#8f4521', '#a85530']);
-    const [x, y] = iso(gx + .25, gy + .25, 9);
-    [[0, -14, 7, '#2f8f3f'], [-6, -8, 6, '#3aa84c'], [6, -9, 6, '#2f8f3f'], [0, -6, 7, '#45b957'], [-3, -19, 5, '#45b957']].forEach(([dx, dy, r, c]) => {
-      ctx.beginPath(); ctx.fillStyle = c; ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .6; ctx.stroke();
+  function drawBigTV(t) {
+    const tt = total(), st = statusOf(tt.cpl), col = STATUS[st].color, hot = hover === BIG;
+    onWall('R', BIG.start, BIG.top, () => {
+      const { w, h } = BIG;
+      glow('#4fc3ff', 14, () => R(-2, -2, w + 4, h + 4, hot ? '#ffe066' : '#000'));
+      R(0, 0, w, h, '#1b1b1b'); R(2, 2, w - 4, h - 4, '#08131f');
+      text('PAINEL GERAL · 7 DIAS', 5, 4, 5.5, '#8ff0ff', 700);
+      text('LEADS', 5, 12, 4.5, '#8c8b82', 600); text(int.format(tt.leads), 5, 17, 9, '#fff', 700);
+      text('INVEST.', 30, 12, 4.5, '#8c8b82', 600); text(brl0.format(tt.spend), 30, 17, 7, '#fff', 700);
+      text('CPL MÉDIO', 5, 28, 4.5, '#8c8b82', 600); text(money(tt.cpl), 5, 33, 7, '#fff', 700);
+      R(w - 12, 28, 8, 8, col); text(STATUS[st].icon, w - 8, 28.5, 6, st === 'warning' ? '#111' : '#fff', 700, 'center');
+      const vals = allDaily.map(d => d.leads), mx = Math.max(...vals, 1);
+      vals.forEach((v, i) => { const bh = Math.max(1, v / mx * 8); R(40 + i * 4, 49 - bh, 3, bh, '#4fc3ff'); });
+      R(2, h - 3, w - 4, 1, col);
     });
-  }
-  function cooler(gx, gy) {
-    box(gx, gy, .45, .45, 22, ['#e9eef2', '#bfc8d0', '#d3dbe2']);
-    box(gx + .07, gy + .07, .3, .3, 12, ['#a6dcff', '#5fb7f2', '#7cc8fb'], 22);
-  }
-  function sofa(gx, gy) {
-    box(gx, gy, .9, 2.2, 6, ['#b13a3a', '#8a2a2a', '#9e3232']);
-    box(gx, gy, .25, 2.2, 15, ['#c24545', '#8a2a2a', '#a33636']);
-    box(gx, gy, .9, .2, 11, ['#c24545', '#8a2a2a', '#a33636']);
-    box(gx, gy + 2, .9, .2, 11, ['#c24545', '#8a2a2a', '#a33636']);
-  }
-  function shelf(gx, gy) {
-    box(gx, gy, .45, 1.6, 46, ['#8f6538', '#6a4728', '#7b5530']);
-    const books = ['#2a78d6', '#eb6834', '#1baf7a', '#fab219', '#d03b3b', '#7c4a7e'];
-    for (let r = 0; r < 3; r++) for (let i = 0; i < 6; i++) {
-      const g = gy + .12 + i * .23;
-      poly([iso(gx + .45, g, 8 + r * 13), iso(gx + .45, g + .17, 8 + r * 13), iso(gx + .45, g + .17, 17 + r * 13 - (i % 3)), iso(gx + .45, g, 17 + r * 13 - (i % 3))], books[(i + r) % 6], 'rgba(0,0,0,.4)');
-    }
-  }
-  function lowTable(gx, gy) {
-    box(gx + .35, gy + .35, .1, .1, 6, ['#555', '#333', '#444']);
-    box(gx, gy, .8, .8, 1.5, ['#e8e2d4', '#b9b2a2', '#cfc8b8'], 6);
-    box(gx + .2, gy + .25, .2, .15, 1, ['#2a78d6', '#1d5aa0', '#2367b8'], 7.5);
+    const [x0, y0] = iso(BIG.start, 0, BIG.top);
+    regions.push({ x: x0, y: y0, w: BIG.w, h: BIG.h + BIG.w / 2, target: BIG });
   }
 
-  // ---------- Avatar estilo Habbo ----------
-  function avatar(p, t) {
-    const L = p.look, seated = isSeated(p);
-    let [x, y] = iso(p.pos.x, p.pos.y);
-    x = Math.round(x); y = Math.round(y);
-    const O = 'rgba(0,0,0,.75)';
-    const step = p.walking ? (Math.floor(t / 150) % 2 ? 1 : -1) : 0;
-    if (!seated) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(x, y, 9, 4, 0, 0, Math.PI * 2); ctx.fill(); }
-    const by = seated ? y - 10 : y;      // base do corpo
-    if (!seated) {
-      R(x - 6, by - 14, 12, 12, O);
-      R(x - 5, by - 13 + Math.max(0, step), 4, 11 - Math.max(0, step), L.pants);
-      R(x + 1, by - 13 + Math.max(0, -step), 4, 11 - Math.max(0, -step), L.pants);
-      R(x - 6, by - 3 - Math.max(0, -step), 5, 3, '#1a1a1a'); R(x + 1, by - 3 - Math.max(0, step), 5, 3, '#1a1a1a');
-    } else {
-      R(x - 6, by - 4, 12, 5, O); R(x - 5, by - 3, 10, 3, L.pants);
+  // ---------- Ordem de desenho (pintor isométrico) ----------
+  function behind(A, B) { return A[2] <= B[0] + 1e-6 || A[3] <= B[1] + 1e-6; }
+  function depthSort(items) {
+    const n = items.length, after = items.map(() => []), indeg = new Array(n).fill(0);
+    const key = it => it.fp[0] + it.fp[2] + it.fp[1] + it.fp[3];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const A = items[i].fp, B = items[j].fp;
+      const ab = behind(A, B), ba = behind(B, A);
+      let first;
+      if (ab && !ba) first = i; else if (ba && !ab) first = j;
+      else if (!ab && !ba) { const dl = items[i].layer - items[j].layer; first = dl ? (dl < 0 ? i : j) : (key(items[i]) <= key(items[j]) ? i : j); }
+      else continue;
+      const second = first === i ? j : i;
+      after[first].push(second); indeg[second]++;
     }
-    // Tronco
-    R(x - 8, by - 28, 16, 16, O);
-    R(x - 7, by - 27, 14, 14, L.shirt);
-    R(x - 7, by - 15, 14, 2, 'rgba(0,0,0,.18)');
-    if (L.suit && !p.back) { R(x - 2, by - 27, 4, 9, '#f2f2f2'); R(x - 1, by - 26, 2, 8, '#d03b3b'); }
-    // Braços
-    const typing = seated && p.id !== 'gerente' ? Math.floor(t / 170 + p.seat.x) % 2 : 0;
-    R(x - 10, by - 27, 4, 12, O); R(x + 6, by - 27, 4, 12, O);
-    R(x - 9, by - 26, 2, 9, L.shirt); R(x + 7, by - 26, 2, 9, L.shirt);
-    R(x - 9, by - 17 - typing, 2, 3, L.skin); R(x + 7, by - 17 - (seated && p.id !== 'gerente' ? 1 - typing : 0), 2, 3, L.skin);
-    // Cabeça grande
-    R(x - 8, by - 43, 16, 16, O);
-    R(x - 7, by - 42, 14, 14, L.skin);
-    R(x - 7, by - 30, 14, 2, 'rgba(0,0,0,.12)');
-    if (p.back) {
-      R(x - 7, by - 44, 14, 13, L.hair); R(x - 8, by - 43, 1, 10, O); R(x + 7, by - 43, 1, 10, O);
-    } else {
-      R(x - 8, by - 45, 16, 7, O);
-      R(x - 7, by - 44, 14, 5, L.hair);
-      R(x - 7, by - 40, 3, L.long ? 12 : 4, L.hair); R(x + 4, by - 40, 3, L.long ? 12 : 3, L.hair);
-      if (L.long) { R(x - 8, by - 40, 1, 12, O); R(x + 7, by - 40, 1, 12, O); }
-      // Rosto em 3/4, virado para baixo-esquerda (como no Habbo)
-      R(x - 5, by - 36, 2, 3, '#1a1a1a'); R(x + 1, by - 36, 2, 3, '#1a1a1a');
-      R(x - 5, by - 36, 1, 1, '#fff'); R(x + 1, by - 36, 1, 1, '#fff');
-      if (L.glasses) { R(x - 6, by - 37, 4, 1, '#eee'); R(x, by - 37, 4, 1, '#eee'); R(x - 2, by - 36, 2, 1, '#eee'); }
-      R(x - 3, by - 31, 3, 1, '#9a4a3a');
+    const out = [], ready = [], used = new Array(n).fill(false);
+    for (let i = 0; i < n; i++) if (!indeg[i]) ready.push(i);
+    while (out.length < n) {
+      let pick;
+      if (ready.length) { ready.sort((a, b) => key(items[a]) - key(items[b])); pick = ready.shift(); }
+      else { pick = -1; for (let i = 0; i < n; i++) if (!used[i] && (pick < 0 || key(items[i]) < key(items[pick]))) pick = i; }
+      if (used[pick]) continue;
+      used[pick] = true; out.push(items[pick]);
+      for (const v of after[pick]) if (--indeg[v] === 0 && !used[v]) ready.push(v);
     }
-    // Etiqueta com o nome
-    ctx.font = `600 6px ${FONT}`;
-    const tw = ctx.measureText(p.tag).width + 8, hot = hover === p;
-    R(x - tw / 2, by - 55, tw, 9, hot ? '#ffe066' : 'rgba(0,0,0,.65)');
-    text(p.tag, x, by - 54, 6, hot ? '#111' : '#fff', 600, 'center');
-    regions.push({ x: x - 10, y: by - 56, w: 20, h: (seated ? 46 : 58), target: p });
+    return out;
   }
-
-  // ---------- Balões de chat (pilha no topo, como no Habbo) ----------
-  const chat = [];
-  function say(p, msg) {
-    chat.forEach(m => m.ty -= 17);
-    chat.push({ p, msg, y: 78, ty: 62, born: performance.now() });
-  }
-  function drawChat(t) {
-    for (let i = chat.length - 1; i >= 0; i--) if (chat[i].ty < -20 || t - chat[i].born > 14000) chat.splice(i, 1);
-    for (const m of chat) {
-      m.y += (m.ty - m.y) * .18;
-      const name = m.p.tag + ': ';
-      ctx.font = `700 7px ${FONT}`; const nw = ctx.measureText(name).width;
-      ctx.font = `400 7px ${FONT}`; const mw = ctx.measureText(m.msg).width;
-      const w = nw + mw + 22, h = 14, [px] = iso(m.p.pos.x, m.p.pos.y);
-      const x = Math.max(4, Math.min(W - w - 4, px - w / 2)), y = Math.round(m.y);
-      const age = t - m.born; ctx.globalAlpha = age > 12000 ? Math.max(0, 1 - (age - 12000) / 2000) : 1;
-      // Balão com borda preta e cantos arredondados
-      ctx.fillStyle = '#000'; roundRect(x - 1, y - 1, w + 2, h + 2, 5); ctx.fill();
-      ctx.fillStyle = '#fff'; roundRect(x, y, w, h, 4); ctx.fill();
-      const tx = Math.max(x + 8, Math.min(x + w - 8, px));
-      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.moveTo(tx - 4, y + h); ctx.lineTo(tx, y + h + 4); ctx.lineTo(tx + 4, y + h); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(tx - 3, y + h - 1); ctx.lineTo(tx, y + h + 2.5); ctx.lineTo(tx + 3, y + h - 1); ctx.fill();
-      // Mini cabeça do autor
-      R(x + 3, y + 3, 8, 8, '#000'); R(x + 4, y + 4, 6, 6, m.p.look.skin); R(x + 4, y + 4, 6, 2, m.p.look.hair);
-      R(x + 5, y + 7, 1, 1, '#000'); R(x + 8, y + 7, 1, 1, '#000');
-      text(name, x + 14, y + 3.5, 7, '#111', 700);
-      text(m.msg, x + 14 + nw, y + 3.5, 7, '#111', 400);
-      ctx.globalAlpha = 1;
-    }
-  }
-  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-
-  // ---------- Ronda do gerente ----------
-  let tour = null;
-  const REPLIES = {
-    gestor: () => `Investimos ${brl0.format(total().spend)} em 7 dias.`,
-    copy: () => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `Melhor CTR: ${b.ad.name} (${pct(b.ad.m.ctr)})`; },
-    analista: () => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `Top campanha: ${b.short}, CPL ${brl0.format(b.m.cpl)}`; },
-  };
-  function startTour() {
-    if (tour) return;
-    const g = PEOPLE.gerente, aisle = 4.75;
-    const path = [{ x: g.seat.x, y: aisle }];
-    ['gestor', 'copy', 'analista'].forEach(id => path.push({ x: PEOPLE[id].seat.x, y: aisle, visit: id }));
-    path.push({ x: g.seat.x, y: aisle }, { x: g.seat.x, y: g.seat.y, end: true });
-    tour = { path, i: 0, wait: 0 };
-    g.walking = true;
-    say(g, 'Equipe, bora fechar o relatório do dia!');
-  }
-  function updateTour(dt) {
-    if (!tour) return;
-    const g = PEOPLE.gerente;
-    if (tour.wait > 0) { tour.wait -= dt; return; }
-    const tg = tour.path[tour.i];
-    const dx = tg.x - g.pos.x, dy = tg.y - g.pos.y, dist = Math.hypot(dx, dy), sp = .0028 * dt;
-    g.walking = true;
-    g.back = dx + dy < -0.001;
-    if (dist <= sp) {
-      g.pos.x = tg.x; g.pos.y = tg.y;
-      if (tg.visit) { g.back = true; say(PEOPLE[tg.visit], REPLIES[tg.visit]()); tour.wait = 1200; }
-      if (tg.end) { g.walking = false; g.back = false; tour = null; openGerente(); return; }
-      tour.i++;
-    } else { g.pos.x += dx / dist * sp; g.pos.y += dy / dist * sp; }
-  }
-
-  // Conversa espontânea
-  const CHATTER = [
-    () => [PEOPLE.analista, (() => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `${b.short} é a melhor: CPL ${brl0.format(b.m.cpl)}`; })()],
-    () => [PEOPLE.gestor, (() => { const w = [...CAMPAIGNS].sort((a, z) => z.m.cpl - a.m.cpl)[0]; return statusOf(w.m.cpl) === 'critical' ? `De olho no ${w.short}, CPL alto!` : 'Todas as campanhas rodando.'; })()],
-    () => [PEOPLE.copy, (() => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `"${b.ad.headline}" está bombando`; })()],
-    () => [PEOPLE.gerente, `Meta de CPL: abaixo de ${brl0.format(metaCPL)}. Foco!`],
-    () => [PEOPLE.analista, `Connect rate geral: ${pct(total().connect)}`],
-  ];
-  let nextChat = 1500, chatIdx = 0;
 
   // ---------- Loop ----------
   let last = performance.now();
   function frame(t) {
     const dt = Math.min(60, t - last); last = t;
-    updateTour(dt);
-    if (!tour && t > nextChat && !backdrop.classList.contains('open')) { const [p, m] = CHATTER[chatIdx++ % CHATTER.length](); say(p, m); nextChat = t + 5000; }
+    for (const id in PEOPLE) step(PEOPLE[id], dt);
+    if (!tour && t > nextChat && !backdrop.classList.contains('open')) { const [p, m] = CHATTER[chatIdx++ % CHATTER.length](); say(p, m); nextChat = t + 5500; }
 
     regions = [];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(K, 0, 0, K, 0, 0);
-    drawRoom();
+    drawRoom(t);
     TVS.forEach(tv => drawTV(tv, t));
+    drawBigTV(t);
 
-    // Ordem de desenho por profundidade (gx + gy)
-    const items = [
-      { z: .9, draw: () => plant(.15, .2) },
-      { z: 13, draw: () => cooler(12.3, .35) },
-      { z: 5.9, draw: () => sofa(.1, 4.7) },
-      { z: 7.5, draw: () => lowTable(1.4, 5.4) },
-      { z: 8.6, draw: () => shelf(0, 7.8) },
-      { z: 21.5, draw: () => plant(12.2, 9.2) },
-      { z: 10.2, draw: () => plant(.2, 9.3) },
-    ];
+    const items = furniture.slice();
     for (const id in PEOPLE) {
-      const p = PEOPLE[id];
-      items.push({ z: p.desk[0] + 1 + p.desk[1] + .5, draw: () => drawDesk(p) });
-      items.push({ z: p.seat.x + p.seat.y - .2, draw: () => drawChair(p) });
-      items.push({ z: isSeated(p) ? p.seat.x + p.seat.y : p.pos.x + p.pos.y + .3, draw: () => avatar(p, t) });
+      const p = PEOPLE[id], r = .16;
+      items.push({ fp: [p.pos.x - r, p.pos.y - r, p.pos.x + r, p.pos.y + r], layer: 1, draw: () => avatar(p, t) });
     }
-    items.sort((a, b) => a.z - b.z).forEach(i => i.draw());
+    depthSort(items).forEach(i => i.draw());
     drawChat(t);
     requestAnimationFrame(frame);
   }
@@ -650,6 +941,7 @@
   canvas.addEventListener('click', e => { const h = hitTest(...toLogical(e)); if (h) activate(h); });
 
   function activate(h) {
+    if (h.big) return openGerente();
     if (h.c) return openTV(h.c);
     if (h.id === 'gerente') return startTour();
     ({ gestor: openGestor, copy: openCopy, analista: openAnalista })[h.id]();
@@ -657,8 +949,10 @@
 
   const toolbar = document.getElementById('toolbar');
   TVS.forEach(tv => { const b = document.createElement('button'); b.textContent = '📺 ' + tv.c.short; b.title = tv.c.name; b.onclick = () => activate(tv); toolbar.appendChild(b); });
-  [['gestor', '👨‍💻'], ['copy', '✍️'], ['analista', '📊'], ['gerente', '👔']].forEach(([id, ic]) => {
-    const b = document.createElement('button'); b.textContent = ic + ' ' + PEOPLE[id].role; b.onclick = () => activate(PEOPLE[id]); toolbar.appendChild(b);
+  { const b = document.createElement('button'); b.textContent = '🖥️ Painel geral'; b.onclick = () => activate(BIG); toolbar.appendChild(b); }
+  ['gestor', 'copy', 'analista', 'gerente'].forEach(id => {
+    const p = PEOPLE[id], b = document.createElement('button');
+    b.textContent = `${p.emoji} ${p.name}`; b.title = p.role; b.onclick = () => activate(p); toolbar.appendChild(b);
   });
 
   // ---------- Janela ----------
@@ -768,7 +1062,7 @@
     const t = total();
     const worstAds = [...allAds].filter(x => statusOf(x.ad.m.cpl) === 'critical').sort((a, z) => z.ad.m.cpl - a.ad.m.cpl);
     const best = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0];
-    openModal('👨‍💻 Gestor de Tráfego', `
+    openModal(label(PEOPLE.gestor), `
       <div class="sub">Visão das campanhas · últimos 7 dias</div>
       <div class="kpis" style="margin-top:12px">
         ${kpi('Investimento', money(t.spend))}${kpi('Leads', int.format(t.leads))}${kpi('CPL médio', money(t.cpl))}
@@ -779,17 +1073,17 @@
       <div class="scroll"><table><thead><tr><th>Campanha</th><th>Status</th><th>Orçamento/dia</th>${HEAD}</tr></thead><tbody>
         ${CAMPAIGNS.map(c => `<tr><td>${esc(c.name)}</td><td>${badge(c.m.cpl)}</td><td>${brl0.format(c.budget)}</td>${rowCells(c.m)}</tr>`).join('')}
       </tbody></table></div>
-      <h3>Sugestões do gestor</h3>
+      <h3>Sugestões do Homem-Aranha</h3>
       <div class="card"><ul>
         ${worstAds.length ? worstAds.slice(0, 3).map(x => `<li>Pausar o anúncio <b>${esc(x.ad.name)}</b> (${esc(x.c.short)}): CPL ${money(x.ad.m.cpl)}.</li>`).join('') : '<li>Nenhum anúncio muito acima da meta.</li>'}
         ${statusOf(best.m.cpl) === 'good' ? `<li>Aumentar em até 20% o orçamento de <b>${esc(best.name)}</b>, que está com CPL ${money(best.m.cpl)}.</li>` : ''}
-      </ul><p class="copy">Nesta versão o gestor só sugere. Na fase com inteligência ele poderá executar, dentro dos limites combinados.</p></div>
+      </ul><p class="copy">Nesta versão ele só sugere. Na fase com inteligência ele poderá executar, dentro dos limites combinados.</p></div>
     `);
   }
 
   function openCopy() {
     const sorted = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr);
-    openModal('✍️ Copywriter', `
+    openModal(label(PEOPLE.copy), `
       <div class="sub" style="margin-bottom:12px">Textos dos anúncios, do maior para o menor CTR · últimos 7 dias</div>
       ${sorted.map((x, i) => `<div class="card">
         <h4>${i === 0 ? '🏆 ' : i === sorted.length - 1 ? '⚠️ ' : ''}${esc(x.ad.name)} <span style="color:var(--ink-2);font-weight:400;font-size:13px">· ${esc(x.c.short)} · ${esc(x.s.name)}</span></h4>
@@ -812,7 +1106,7 @@
   function openAnalista() {
     const { camps, sets, ads, conn } = analystInsights();
     const lastOf = a => a[a.length - 1];
-    openModal('📊 Analista de Dados', `
+    openModal(label(PEOPLE.analista), `
       <div class="sub">Ranking por CPL (menor é melhor) · últimos 7 dias</div>
       <h3>Campanhas</h3>
       <div class="scroll"><table><thead><tr><th>#</th><th>Campanha</th><th>Status</th>${HEAD}</tr></thead><tbody>
@@ -834,7 +1128,7 @@
     const { camps, ads } = analystInsights();
     const byCtr = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr);
     const bad = camps.filter(c => statusOf(c.m.cpl) !== 'good');
-    openModal('👔 Relatório do Gerente', `
+    openModal('🦇 Relatório do Batman · Gerente', `
       <div class="sub">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</div>
       <h3>Resumo do dia</h3>
       <div class="card summary">
@@ -844,15 +1138,15 @@
         ${bad.length ? `Atenção: <b>${bad.map(c => esc(c.name)).join('</b> e <b>')}</b> ${bad.length > 1 ? 'estão' : 'está'} acima da meta de ${brl0.format(metaCPL)}.` : 'Todas as campanhas estão dentro da meta. 🎉'}
       </div>
       <h3>Por colaborador</h3>
-      <div class="card"><h4>👨‍💻 Gestor de Tráfego</h4><ul>
+      <div class="card"><h4>🕷️ Homem-Aranha · Gestor de Tráfego</h4><ul>
         <li>Investimento 7d: ${money(t.spend)} · Leads: ${int.format(t.leads)} · CPL médio: ${money(t.cpl)}</li>
         <li>Campanhas ativas: ${CAMPAIGNS.length} · Pausadas: 0</li>
       </ul></div>
-      <div class="card"><h4>✍️ Copywriter</h4><ul>
+      <div class="card"><h4>⚔️ Deadpool · Copywriter</h4><ul>
         <li>Melhor CTR: <b>${esc(byCtr[0].ad.name)}</b> (${pct(byCtr[0].ad.m.ctr)}): "${esc(byCtr[0].ad.headline)}"</li>
         <li>Pior CTR: <b>${esc(byCtr[byCtr.length - 1].ad.name)}</b> (${pct(byCtr[byCtr.length - 1].ad.m.ctr)}). Vale testar um novo texto.</li>
       </ul></div>
-      <div class="card"><h4>📊 Analista de Dados</h4><ul>
+      <div class="card"><h4>🖤 Venom · Analista de Dados</h4><ul>
         ${camps.map((c, i) => `<li>${MEDAL[i] || i + 1} ${esc(c.name)}: CPL ${money(c.m.cpl)} · ${int.format(c.m.leads)} leads ${badge(c.m.cpl)}</li>`).join('')}
         <li>Melhor anúncio: <b>${esc(ads[0].ad.name)}</b>, CPL ${money(ads[0].ad.m.cpl)}</li>
       </ul></div>
