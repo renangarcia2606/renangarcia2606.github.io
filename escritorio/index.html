@@ -52,8 +52,19 @@
   .hud input { width: 100%; font-family: var(--tron); font-size: 19px; font-weight: 700; color: var(--or); background: #000; border: 1px solid var(--or); padding: 2px 8px; box-shadow: var(--glow-or); text-shadow: 0 0 6px rgba(255,159,28,.6); }
   .hud input:focus-visible { outline: 2px solid var(--cy); outline-offset: 2px; }
 
-  .stage { position: relative; background: #000; border: 1px solid var(--cy-dim); box-shadow: var(--glow); overflow: hidden; }
-  canvas { display: block; width: 100%; height: auto; touch-action: manipulation; }
+  .stage { position: relative; background: #000; border: 1px solid var(--cy-dim); box-shadow: var(--glow); overflow: hidden; aspect-ratio: 16 / 10; }
+  .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  .labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .nametag { position: absolute; left: 0; top: 0; pointer-events: auto; cursor: pointer; font-family: var(--tron); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); background: rgba(0,8,13,.78); border: 1px solid var(--cy-dim); padding: 2px 8px; white-space: nowrap; will-change: transform; }
+  .nametag.hot, .nametag:hover { background: var(--cy); color: #001014; }
+  .bubble { position: absolute; left: 0; top: 0; max-width: 240px; font-size: 12px; line-height: 1.35; color: var(--text); background: rgba(2,10,16,.94); border: 1px solid var(--cy); box-shadow: var(--glow); padding: 6px 10px; opacity: 0; transition: opacity .25s; will-change: transform; }
+  .bubble.show { opacity: 1; }
+  .bubble b { color: var(--cy); }
+  .camctl { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  .camctl button { width: 34px; height: 34px; font: 700 16px/1 system-ui; color: var(--cy); background: rgba(0,8,13,.8); border: 1px solid var(--cy); cursor: pointer; clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .camctl button:hover { background: var(--cy); color: #001014; }
+  .camctl button:focus-visible { outline: 2px solid var(--or); outline-offset: 2px; }
+  .nogl { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); font-family: var(--tron); }
 
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: var(--panel); border: 1px solid var(--cy-dim); border-top: 0; }
   .toolbar button {
@@ -133,6 +144,7 @@
     .backdrop { padding: 12px 8px; }
     .toolbar button { font-size: 10px; padding: 6px 9px; }
     header.top h1 { font-size: 17px; letter-spacing: 2px; }
+    .stage { aspect-ratio: 4 / 5; }
   }
   @media (prefers-reduced-motion: reduce) { .modal, .modal::after { animation: none; } }
 </style>
@@ -151,11 +163,13 @@
     <div class="tile"><label class="k" for="metaInput">Meta de CPL (R$)</label><input id="metaInput" type="number" min="1" step="1" inputmode="decimal"></div>
   </section>
 
-  <div class="stage">
-    <canvas id="office" aria-label="Escritório virtual isométrico. Use a barra abaixo para abrir as TVs e os colaboradores."></canvas>
+  <div class="stage" id="stage">
+    <canvas id="office" aria-label="Escritório virtual em 3D. Use a barra abaixo para abrir as TVs e os colaboradores."></canvas>
+    <div class="labels" id="labels"></div>
+    <div class="camctl" id="camctl" aria-label="Câmera"></div>
   </div>
   <nav class="toolbar" id="toolbar" aria-label="Atalhos"></nav>
-  <p class="hint">Clique numa TV para analisar a campanha, ou num colaborador para ver o trabalho dele. Clique no Batman (Gerente) para ele fazer a ronda e entregar o relatório geral. Os personagens andam sozinhos pelo escritório.</p>
+  <p class="hint">Clique numa TV para analisar a campanha, ou num colaborador para ver o trabalho dele. Clique no Batman (Gerente) para ele fazer a ronda e entregar o relatório geral. Os personagens andam sozinhos pelo escritório. Arraste para girar a câmera, use a roda do mouse (ou dois dedos) para zoom.</p>
 </div>
 
 <div class="backdrop" id="backdrop">
@@ -166,6 +180,8 @@
 </div>
 <div id="tip" role="status"></div>
 
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
 <script>
 (() => {
   // ---------- Formatação ----------
@@ -297,127 +313,30 @@
   renderHud();
 
   // =====================================================================
-  //  Escritório isométrico
+  //  Escritório 3D (estilo The Sims) — Three.js
   // =====================================================================
-  const W = 600, H = 400;
-  const TW = 32, TH = 16;          // losango do piso (2:1)
-  const GX = 18, GY = 14;          // tamanho da sala em tiles
-  const WALL = 104;                // altura da parede
-  const OX = W / 2 + (GY - GX) * TW / 4, OY = 124;
-  const FONT = '"Pixelify Sans", ui-monospace, monospace';
-  const CY = '#00e5ff', OR = '#ff9f1c';   // paleta Tron
-
+  const GX = 18, GY = 14, WALL_H = 3;
+  const CY = '#00e5ff', OR = '#ff9f1c';
+  const stage = document.getElementById('stage');
   const canvas = document.getElementById('office');
-  const ctx = canvas.getContext('2d');
-  canvas.style.aspectRatio = W + ' / ' + H;
-  let K = 1;
-  function resize() {
-    const cssW = canvas.clientWidth || W, dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssW * H / W * dpr);
-    K = canvas.width / W;
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
-  // gx cresce para baixo-direita, gy para baixo-esquerda, h para cima.
-  const iso = (gx, gy, h = 0) => [OX + (gx - gy) * TW / 2, OY + (gx + gy) * TH / 2 - h];
-
-  const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
-  function poly(pts, fill, stroke) {
-    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
-    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .6; ctx.stroke(); }
-  }
-  // Caixa isométrica: ocupa [gx, gx+w] x [gy, gy+d], da altura z até z+h. col = [topo, frente-esq, frente-dir]
-  function box(gx, gy, w, d, h, col, z = 0, edge = 'rgba(0,229,255,.55)') {
-    const t = z + h;
-    poly([iso(gx, gy + d, t), iso(gx + w, gy + d, t), iso(gx + w, gy + d, z), iso(gx, gy + d, z)], col[1], edge);
-    poly([iso(gx + w, gy, t), iso(gx + w, gy + d, t), iso(gx + w, gy + d, z), iso(gx + w, gy, z)], col[2], edge);
-    poly([iso(gx, gy, t), iso(gx + w, gy, t), iso(gx + w, gy + d, t), iso(gx, gy + d, t)], col[0], edge);
-  }
-  // Desenho "colado" numa parede: (u, v) local -> parede direita (gy=0) ou esquerda (gx=0).
-  function onWall(side, start, hTop, fn) {
-    ctx.save();
-    if (side === 'R') { const [x, y] = iso(start, 0, hTop); ctx.transform(1, .5, 0, 1, x, y); }
-    else { const [x, y] = iso(0, start, hTop); ctx.transform(1, -.5, 0, 1, x, y); }
-    fn(); ctx.restore();
-  }
-  const text = (s, x, y, size, color, weight = 400, align = 'left') => {
-    ctx.font = `${weight} ${size}px ${FONT}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'top'; ctx.fillText(s, x, y);
-  };
-  const glow = (color, blur, fn) => { ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = blur * K; fn(); ctx.restore(); };
-
-  // ---------- Personagens ----------
-  const O = 'rgba(0,0,0,.8)';
-  const LOOKS = {
-    spider: {
-      mask: '#c8102e', suit: '#c8102e', side: '#1d4fa8', arm: '#c8102e', gloves: '#c8102e', legs: '#1d4fa8', boots: '#c8102e',
-      face(x, by) {
-        R(x - 1, by - 42, 1, 14, 'rgba(0,0,0,.3)'); R(x - 7, by - 34, 14, 1, 'rgba(0,0,0,.3)');
-        R(x - 7, by - 39, 5, 5, '#000'); R(x - 6, by - 38, 3, 3, '#fff');
-        R(x, by - 39, 5, 5, '#000'); R(x + 1, by - 38, 3, 3, '#fff');
-      },
-      backHead(x, by) { R(x - 1, by - 42, 1, 14, 'rgba(0,0,0,.3)'); R(x - 7, by - 35, 14, 1, 'rgba(0,0,0,.3)'); },
-      chest(x, by) { R(x - 1, by - 25, 2, 5, '#111'); R(x - 3, by - 24, 6, 1, '#111'); R(x - 3, by - 22, 6, 1, '#111'); R(x - 7, by - 20, 14, 1, 'rgba(0,0,0,.25)'); },
-    },
-    deadpool: {
-      mask: '#b3121a', suit: '#b3121a', side: '#1a1a1a', arm: '#b3121a', gloves: '#1a1a1a', legs: '#b3121a', boots: '#1a1a1a',
-      behind(x, by) { R(x - 8, by - 36, 2, 10, '#222'); R(x + 6, by - 36, 2, 10, '#222'); R(x - 8, by - 37, 2, 2, '#b0b0b0'); R(x + 6, by - 37, 2, 2, '#b0b0b0'); },
-      face(x, by) {
-        R(x - 7, by - 40, 6, 6, '#111'); R(x + 1, by - 40, 6, 6, '#111');
-        R(x - 5, by - 38, 3, 2, '#fff'); R(x + 2, by - 38, 3, 2, '#fff');
-      },
-      chest(x, by) { R(x - 7, by - 15, 14, 2, '#2a2a2a'); R(x - 1, by - 16, 3, 3, '#e8c13a'); R(x - 6, by - 26, 2, 10, 'rgba(0,0,0,.25)'); },
-      over(x, by) { R(x - 6, by - 36, 2, 20, '#3a3a3a'); R(x + 4, by - 36, 2, 20, '#3a3a3a'); R(x - 7, by - 37, 4, 3, '#222'); R(x + 3, by - 37, 4, 3, '#222'); },
-    },
-    venom: {
-      mask: '#141418', suit: '#141418', side: '#22304a', arm: '#141418', gloves: '#141418', legs: '#141418', boots: '#141418',
-      face(x, by) {
-        R(x - 7, by - 40, 5, 3, '#fff'); R(x - 6, by - 37, 3, 2, '#fff');
-        R(x + 2, by - 40, 5, 3, '#fff'); R(x + 3, by - 37, 3, 2, '#fff');
-        R(x - 6, by - 33, 12, 3, '#fff');
-        [-5, -3, -1, 1, 3].forEach(i => R(x + i, by - 33, 1, 3, '#000'));
-        R(x - 1, by - 30, 3, 3, '#c2185b');
-        R(x - 7, by - 42, 1, 6, '#2b3a5c');
-      },
-      backHead(x, by) { R(x - 7, by - 42, 2, 8, '#2b3a5c'); },
-      chest(x, by) {
-        R(x - 1, by - 27, 2, 11, '#fff'); R(x - 7, by - 26, 14, 1, '#fff');
-        R(x - 6, by - 23, 5, 1, '#fff'); R(x + 1, by - 23, 5, 1, '#fff'); R(x - 5, by - 20, 4, 1, '#fff'); R(x + 1, by - 20, 4, 1, '#fff');
-      },
-    },
-    batman: {
-      mask: '#1c1c22', suit: '#5a606b', side: '#4a4f59', arm: '#5a606b', gloves: '#1c1c22', legs: '#4a4f59', boots: '#1c1c22', cape: '#1c1c22',
-      behind(x, by, sit) { R(x - 10, by - 29, 20, sit ? 24 : 27, O); R(x - 9, by - 28, 18, sit ? 22 : 25, '#1c1c22'); },
-      top(x, by) { R(x - 8, by - 48, 4, 6, O); R(x + 4, by - 48, 4, 6, O); R(x - 7, by - 47, 2, 5, '#1c1c22'); R(x + 5, by - 47, 2, 5, '#1c1c22'); },
-      face(x, by) {
-        R(x - 6, by - 33, 12, 5, '#d9a37a'); R(x - 3, by - 31, 4, 1, '#7a3b2a');
-        R(x - 6, by - 38, 4, 1, '#fff'); R(x + 1, by - 38, 4, 1, '#fff');
-      },
-      chest(x, by) {
-        R(x - 4, by - 25, 8, 4, '#e8c13a'); R(x - 3, by - 24, 6, 2, '#111'); R(x - 1, by - 25, 2, 1, '#111');
-        R(x - 7, by - 15, 14, 2, '#e8c13a');
-      },
-      over(x, by, sit) { R(x - 9, by - 29, 18, sit ? 25 : 28, O); R(x - 8, by - 28, 16, sit ? 23 : 26, '#1c1c22'); R(x - 6, by - 28, 1, 20, '#2b2b33'); R(x + 3, by - 28, 1, 20, '#2b2b33'); },
-    },
-  };
-
-  const PEOPLE = {
-    gestor:   { name: 'Homem-Aranha', role: 'Gestor de Tráfego', emoji: '🕷️', look: LOOKS.spider,   seat: { x: 2.5,  y: 2.5, face: 'SW', h: 8 }, desk: [1, 3] },
-    copy:     { name: 'Deadpool',     role: 'Copywriter',        emoji: '⚔️', look: LOOKS.deadpool, seat: { x: 6.5,  y: 2.5, face: 'SW', h: 8 }, desk: [5, 3] },
-    analista: { name: 'Venom',        role: 'Analista de Dados', emoji: '🖤', look: LOOKS.venom,    seat: { x: 10.5, y: 2.5, face: 'SW', h: 8 }, desk: [9, 3] },
-    gerente:  { name: 'Batman',       role: 'Gerente',           emoji: '🦇', look: LOOKS.batman,   seat: { x: 2.5,  y: 8.5, face: 'SW', h: 8 }, desk: [1, 9] },
-  };
-  const WORKERS = ['gestor', 'copy', 'analista'];
-  for (const id in PEOPLE) {
-    const p = PEOPLE[id];
-    Object.assign(p, { id, pos: { x: p.seat.x, y: p.seat.y }, path: [], goal: null, face: 'SW',
-      sitAt: { h: p.seat.h, face: 'SW' }, timer: 3000 + Math.random() * 9000, home: true, paused: false });
-  }
+  const labelsEl = document.getElementById('labels');
   const label = p => `${p.emoji} ${p.name} · ${p.role}`;
 
-  // ---------- Mapa de obstáculos e caminhos ----------
+  // ---------- Personagens (dados) ----------
+  const PEOPLE = {
+    gestor:   { name: 'Homem-Aranha', role: 'Gestor de Tráfego', emoji: '🕷️', costume: 'spider',   seat: { x: 2.5,  y: 2.5, face: 'SW', h: .5 }, desk: [1, 3] },
+    copy:     { name: 'Deadpool',     role: 'Copywriter',        emoji: '⚔️', costume: 'deadpool', seat: { x: 6.5,  y: 2.5, face: 'SW', h: .5 }, desk: [5, 3] },
+    analista: { name: 'Venom',        role: 'Analista de Dados', emoji: '🖤', costume: 'venom',    seat: { x: 10.5, y: 2.5, face: 'SW', h: .5 }, desk: [9, 3] },
+    gerente:  { name: 'Batman',       role: 'Gerente',           emoji: '🦇', costume: 'batman',   seat: { x: 2.5,  y: 8.5, face: 'SW', h: .5 }, desk: [1, 9] },
+  };
+  const WORKERS = ['gestor', 'copy', 'analista'];
+
+  if (!window.THREE || !(() => { try { return !!document.createElement('canvas').getContext('webgl'); } catch (e) { return false; } })()) {
+    stage.insertAdjacentHTML('beforeend', '<div class="nogl">Seu navegador não conseguiu abrir o 3D. Use a barra abaixo para ver os relatórios.</div>');
+  }
+  const HAS3D = !!window.THREE && !stage.querySelector('.nogl');
+
+  // ---------- Mapa de obstáculos e caminhos (grid de 1 m) ----------
   const cost = new Array(GX * GY).fill(1);
   const ix = (x, y) => y * GX + x;
   function block(gx, gy, w, d, c = Infinity) {
@@ -426,7 +345,6 @@
         if (x >= 0 && y >= 0 && x < GX && y < GY) cost[ix(x, y)] = c;
   }
   const walkable = (x, y) => x >= 0 && y >= 0 && x < GX && y < GY && isFinite(cost[ix(x, y)]);
-
   function findPath(sx, sy, tx, ty) {
     const n = GX * GY, dist = new Array(n).fill(Infinity), prev = new Array(n).fill(-1), done = new Array(n).fill(false);
     const start = ix(sx, sy), goal = ix(tx, ty);
@@ -441,7 +359,7 @@
         if (!dx && !dy) continue;
         const vx = ux + dx, vy = uy + dy;
         if (!walkable(vx, vy)) continue;
-        if (dx && dy && (!walkable(ux + dx, uy) || !walkable(ux, uy + dy))) continue;   // sem cortar quina
+        if (dx && dy && (!walkable(ux + dx, uy) || !walkable(ux, uy + dy))) continue;
         const v = ix(vx, vy), c = (v === goal ? 1 : cost[v]) * (dx && dy ? 1.42 : 1);
         if (dist[u] + c < dist[v]) { dist[v] = dist[u] + c; prev[v] = u; }
       }
@@ -452,124 +370,42 @@
     return out;
   }
 
-  // ---------- Móveis (posição, obstáculo e desenho) ----------
-  const furniture = [];   // { fp: [x0, y0, x1, y1], layer, draw }
-  const put = (fp, draw, layer = 0) => furniture.push({ fp, draw, layer });
-
-  const WHITE = ['#0d1a26', '#07111a', '#0a1620'], BLACK = ['#0a0f16', '#05080c', '#080c12'], GOLD = ['#ff9f1c', '#b36a0a', '#d9840f'];
-
-  function addDesk(p) {
-    const [gx, gy] = p.desk;
-    block(gx, gy, 3, 1);
-    put([gx, gy, gx + 3, gy + 1], () => {
-      const hot = hover === p;
-      box(gx + .08, gy + .1, .12, .8, 14, BLACK); box(gx + 2.8, gy + .1, .12, .8, 14, BLACK);
-      box(gx + .2, gy + .05, 2.6, .12, 9, BLACK, 5);
-      box(gx, gy, 3, 1, 2.5, hot ? ['#fff7c2', '#d6cf9e', '#ebe4b0'] : WHITE, 14);
-      // Dois monitores (de costas, com luz do LED da tela)
-      for (const mx of [.9, 1.65]) {
-        glow('#4fc3ff', 6, () => box(gx + mx, gy + .22, .65, .08, 12, ['#3a3a40', '#222228', '#2c2c32'], 18));
-        box(gx + mx + .27, gy + .3, .1, .12, 2, BLACK, 16.5);
-      }
-      box(gx + .3, gy + .45, .4, .35, .8, ['#9ff6ff', '#00a8bb', '#00c6dc'], 16.5);
-      box(gx + 2.5, gy + .55, .14, .14, 3.5, p.id === 'gerente' ? GOLD : ['#c8102e', '#8c0b20', '#a50d26'], 16.5);
-      const [x0] = iso(gx, gy + 1), [x1] = iso(gx + 3, gy), [, yT] = iso(gx, gy, 34), [, yB] = iso(gx + 3, gy + 1);
-      regions.push({ x: x0, y: yT, w: x1 - x0, h: yB - yT, target: p });
-    });
-  }
-  // Cadeira: assento + encosto do lado oposto ao rosto de quem senta.
-  function addChair(x, y, face, col = ['#0f1d2b', '#08121c', '#0b1824'], h = 8) {
-    block(x - .5, y - .5, 1, 1, 6);
-    put([x - .3, y - .3, x + .3, y + .3], () => { box(x - .05, y - .05, .1, .1, h - 3, BLACK); box(x - .3, y - .3, .6, .6, 3, col, h - 3); });
-    const B = { SW: [x - .3, y - .4, .6, .12], NE: [x - .3, y + .28, .6, .12], SE: [x - .4, y - .3, .12, .6], NW: [x + .28, y - .3, .12, .6] }[face];
-    put([B[0], B[1], B[0] + B[2], B[1] + B[3]], () => box(B[0], B[1], B[2], B[3], 13, col, h), face === 'NE' || face === 'NW' ? 2 : 0);
-  }
-  function addPlant(gx, gy, big = false) {
-    block(gx, gy, .5, .5);
-    put([gx, gy, gx + .5, gy + .5], () => {
-      box(gx, gy, .5, .5, big ? 12 : 9, ['#0a1620', '#050b12', '#08111a']);
-      const [x, y] = iso(gx + .25, gy + .25, big ? 12 : 9);
-      const leaves = big
-        ? [[0, -26, 6, '#2f8f3f'], [-6, -18, 7, '#3aa84c'], [6, -19, 7, '#2f8f3f'], [0, -12, 8, '#45b957'], [-4, -32, 5, '#45b957'], [5, -30, 5, '#3aa84c'], [-7, -8, 5, '#2f8f3f']]
-        : [[0, -14, 7, '#2f8f3f'], [-6, -8, 6, '#3aa84c'], [6, -9, 6, '#2f8f3f'], [0, -6, 7, '#45b957'], [-3, -19, 5, '#45b957']];
-      leaves.forEach(([dx, dy, r, c]) => { ctx.beginPath(); ctx.fillStyle = c; ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .6; ctx.stroke(); });
-    });
-  }
-
-  // Mesas de trabalho e cadeiras
-  for (const id in PEOPLE) { const p = PEOPLE[id]; addDesk(p); addChair(p.seat.x, p.seat.y, 'SW', id === 'gerente' ? ['#2a1606', '#1a0d03', '#221204'] : undefined); }
-
-  // Lounge: sofá de frente para o painel geral, mesa de centro e poltrona
-  block(13, 4, 4, 1, 6);
-  put([13, 4, 17, 4.75], () => {
-    const C = ['#0b1824', '#060f18', '#09141f'];
-    box(13, 4, 4, .75, 6, C);
-    box(13, 4, .2, .75, 11, C, 0); box(16.8, 4, .2, .75, 11, C, 0);
-    for (let i = 0; i < 4; i++) box(13.25 + i * .9, 4.05, .85, .65, 2, ['#0f2a38', '#0a1d27', '#0c2330'], 6);
-  });
-  put([13, 4.75, 17, 5], () => box(13, 4.75, 4, .25, 15, ['#0f2a38', '#060f18', '#09141f']), 2);
-  block(14, 2.2, 2, .75);
-  put([14, 2.2, 16, 2.95], () => { box(14.9, 2.5, .2, .2, 5, GOLD); box(14, 2.2, 2, .75, 1.5, ['#02060b', '#010306', '#02050a'], 5); box(14.3, 2.4, .3, .2, 2.5, ['#9ff6ff', '#00a8bb', '#00c6dc'], 6.5); box(15.3, 2.45, .25, .25, 3, GOLD, 6.5); });
-  addChair(12.5, 2.5, 'SE', ['#2a1606', '#1a0d03', '#221204'], 7);
-  // Luminária de chão
-  block(17.3, 5.4, .4, .4);
-  put([17.3, 5.4, 17.7, 5.8], () => {
-    box(17.4, 5.5, .2, .2, 1, GOLD); box(17.47, 5.57, .06, .06, 40, GOLD, 1);
-    glow('#ffd77a', 14, () => box(17.3, 5.4, .4, .4, 8, ['#fff1c9', '#e6cf8f', '#f0dca6'], 40));
-  });
-
-  // Sala de reunião: mesa de vidro + 6 cadeiras
+  // Obstáculos (mesmo layout em metros: x = gx, z = gy)
+  for (const id in PEOPLE) { const [gx, gy] = PEOPLE[id].desk; block(gx, gy, 3, 1); block(PEOPLE[id].seat.x - .5, PEOPLE[id].seat.y - .5, 1, 1, 6); }
+  block(13, 4, 4, 1, 6); block(14, 2.2, 2, .75); block(12, 2, 1, 1, 6); block(17.3, 5.4, .4, .4);
   block(7, 7, 3, 2);
-  put([7, 7, 10, 9], () => {
-    box(8.4, 7.9, .2, .2, 10, BLACK);
-    box(7, 7, 3, 2, 1.5, ['rgba(0,229,255,.18)', 'rgba(0,229,255,.28)', 'rgba(0,229,255,.22)'], 10, CY);
-    box(7.6, 7.5, .5, .35, .5, ['#9ff6ff', '#00a8bb', '#00c6dc'], 11.5); box(9, 8.2, .3, .3, 1, BLACK, 11.5);
-  });
   const MEETING = [[6.5, 7.5, 'SE'], [6.5, 8.5, 'SE'], [10.5, 7.5, 'NW'], [10.5, 8.5, 'NW'], [8.5, 6.5, 'SW'], [8.5, 9.5, 'NE']];
-  MEETING.forEach(([x, y, f]) => addChair(x, y, f));
+  MEETING.forEach(([x, y]) => block(x - .5, y - .5, 1, 1, 6));
+  block(15, 9, 2.6, .8); block(16, 10, 1, 1, 6); block(17.2, 7.2, .5, .5); block(0, 6.6, .55, 1.8);
+  const PLANTS = [[.1, .1, true], [17.3, 12.9, true], [.1, 13.4, true], [4.4, 9.25], [12.25, .1]];
+  PLANTS.forEach(([x, y]) => block(x, y, .5, .5));
 
-  // Café: balcão, máquina e banqueta
-  block(15, 9, 2.6, .8);
-  put([15, 9, 17.6, 9.8], () => {
-    box(15, 9, 2.6, .8, 15, ['#2a2a30', '#17171b', '#202026']);
-    box(15, 9, 2.6, .8, 1.5, ['#0d1a26', '#07111a', '#0a1620'], 15);
-    box(15.3, 9.2, .45, .4, 8, ['#555', '#333', '#444'], 16.5); box(15.42, 9.45, .2, .12, 2, ['#d03b3b', '#a02a2a', '#b83030'], 19);
-    box(16.4, 9.3, .14, .14, 3, WHITE, 16.5); box(16.7, 9.3, .14, .14, 3, WHITE, 16.5);
-    glow(OR, 8, () => { const [a, b] = iso(15, 9.8, 2), [c, d] = iso(17.6, 9.8, 2); ctx.strokeStyle = OR; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); });
-  });
-  addChair(16.5, 10.5, 'NE', ['#2a1606', '#1a0d03', '#221204'], 9);
-
-  // Bebedouro, armário de troféus, plantas
-  block(17.2, 7.2, .5, .5);
-  put([17.2, 7.2, 17.7, 7.7], () => { box(17.2, 7.2, .5, .5, 22, ['#0a1620', '#050b12', '#08111a']); box(17.28, 7.28, .34, .34, 12, ['#7ff3ff', '#00b8cc', '#00d4ea'], 22); });
-  block(0, 6.6, .55, 1.8);
-  put([0, 6.6, .55, 8.4], () => {
-    box(0, 6.6, .55, 1.8, 22, ['#2a2a30', '#17171b', '#202026']);
-    box(.1, 6.9, .2, .2, 5, GOLD, 22); box(.1, 7.5, .18, .18, 7, GOLD, 22); box(.1, 8, .2, .2, 4, ['#c0c0c0', '#8a8a8a', '#a5a5a5'], 22);
-  });
-  addPlant(.1, .1, true); addPlant(17.3, 12.9, true); addPlant(.1, 13.4, true); addPlant(4.4, 9.25); addPlant(12.25, .1);
-
-  // ---------- Pontos de interesse (para onde os personagens vão) ----------
+  // ---------- Pontos de interesse ----------
   const POIS = [
     { x: 15.5, y: 10.5, face: 'NE', say: ['☕ Pausa pro café.', 'Café sem açúcar, igual meu CPL: enxuto.'] },
-    { x: 16.5, y: 10.5, face: 'NE', sit: 9, say: ['Esse balcão é chique demais.'] },
+    { x: 16.5, y: 10.5, face: 'NE', sit: .72, say: ['Esse balcão é chique demais.'] },
     { x: 16.5, y: 7.5, face: 'SE', say: ['Hidratação em dia!'] },
     { x: 0.5, y: 12.5, face: 'NW', say: ['Que vista linda da cidade.', 'Olhando o mercado lá fora...'] },
-    { x: 13.5, y: 4.5, face: 'NE', sit: 7, say: ['Painel geral no telão!'] },
-    { x: 14.5, y: 4.5, face: 'NE', sit: 7, say: ['Sofá + dashboard = felicidade.'] },
-    { x: 15.5, y: 4.5, face: 'NE', sit: 7 },
-    { x: 16.5, y: 4.5, face: 'NE', sit: 7 },
-    { x: 12.5, y: 2.5, face: 'SE', sit: 7, say: ['Poltrona de chefe.'] },
-    ...MEETING.map(([x, y, face]) => ({ x, y, face, sit: 8 })),
+    { x: 13.5, y: 4.5, face: 'NE', sit: .45, say: ['Painel geral no telão!'] },
+    { x: 14.5, y: 4.5, face: 'NE', sit: .45, say: ['Sofá + dashboard = felicidade.'] },
+    { x: 15.5, y: 4.5, face: 'NE', sit: .45 },
+    { x: 16.5, y: 4.5, face: 'NE', sit: .45 },
+    { x: 12.5, y: 2.5, face: 'SE', sit: .45, say: ['Poltrona de chefe.'] },
+    ...MEETING.map(([x, y, face]) => ({ x, y, face, sit: .5 })),
   ];
   const deskFront = id => ({ x: PEOPLE[id].seat.x, y: id === 'gerente' ? 10.5 : 4.5, face: 'NE' });
+  const YAW = { SW: 0, NE: Math.PI, SE: Math.PI / 2, NW: -Math.PI / 2 };
 
   // ---------- Movimentação ----------
   const faceFrom = (dx, dy) => Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'SE' : 'NW') : (dy > 0 ? 'SW' : 'NE');
   const tileOf = p => [Math.min(GX - 1, Math.max(0, Math.floor(p.pos.x))), Math.min(GY - 1, Math.max(0, Math.floor(p.pos.y)))];
   const taken = new Set();
   const keyOf = g => g.x + ',' + g.y;
-
+  for (const id in PEOPLE) {
+    const p = PEOPLE[id];
+    Object.assign(p, { id, pos: { x: p.seat.x, y: p.seat.y }, path: [], goal: null, face: 'SW', yaw: 0,
+      sitAt: { h: p.seat.h, face: 'SW' }, timer: 3000 + Math.random() * 9000, home: true, paused: false, walkPhase: 0 });
+  }
   function goTo(p, goal) {
     const [sx, sy] = tileOf(p);
     const path = findPath(sx, sy, Math.floor(goal.x), Math.floor(goal.y));
@@ -577,12 +413,10 @@
     if (p.goal) taken.delete(keyOf(p.goal));
     taken.add(keyOf(goal));
     p.goal = goal; p.path = path; p.sitAt = null; p.home = false;
-    if (path.length) { const last = path[path.length - 1]; last.x = goal.x; last.y = goal.y; }
-    else arrive(p);
+    if (path.length) { const last = path[path.length - 1]; last.x = goal.x; last.y = goal.y; } else arrive(p);
     return true;
   }
   function goHome(p, extra = {}) { goTo(p, { x: p.seat.x, y: p.seat.y, face: p.seat.face, sit: p.seat.h, home: true, dwell: 9000 + Math.random() * 10000, ...extra }); }
-
   function arrive(p) {
     const g = p.goal;
     p.pos = { x: g.x, y: g.y };
@@ -593,12 +427,10 @@
     if (g.say && Math.random() < .6) say(p, g.say[Math.floor(Math.random() * g.say.length)]);
     if (g.onArrive) g.onArrive();
   }
-
   function decide(p) {
     if (p.id === 'gerente' && tour) return tourNext();
     if (p.paused) { p.timer = 600; return; }
     if (!p.home) return goHome(p);
-    // Sai da mesa para um ponto livre (ou visita um colega)
     if (Math.random() < .25) {
       const others = Object.keys(PEOPLE).filter(id => id !== p.id);
       const id = others[Math.floor(Math.random() * others.length)];
@@ -609,15 +441,16 @@
     const g = free[Math.floor(Math.random() * free.length)];
     if (g) goTo(p, { ...g }); else p.timer = 2000;
   }
-
   function step(p, dt) {
     if (p.path.length) {
-      const n = p.path[0], dx = n.x - p.pos.x, dy = n.y - p.pos.y, d = Math.hypot(dx, dy), sp = .0022 * dt;
+      const n = p.path[0], dx = n.x - p.pos.x, dy = n.y - p.pos.y, d = Math.hypot(dx, dy), sp = .0016 * dt;
       p.face = faceFrom(dx, dy);
+      if (d > 1e-4) p.targetYaw = Math.atan2(dx, dy);
       if (d <= sp) { p.pos.x = n.x; p.pos.y = n.y; p.path.shift(); if (!p.path.length) arrive(p); }
       else { p.pos.x += dx / d * sp; p.pos.y += dy / d * sp; }
       return;
     }
+    p.targetYaw = YAW[p.face];
     p.timer -= dt;
     if (p.timer <= 0) decide(p);
   }
@@ -630,11 +463,11 @@
     analista: () => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `NÓS achamos a melhor: ${b.short}, CPL ${brl0.format(b.m.cpl)}.`; },
   };
   function startTour() {
+    if (!HAS3D) return openGerente();
     if (tour) return;
     tour = { queue: [...WORKERS] };
     WORKERS.forEach(id => PEOPLE[id].paused = true);
-    const g = PEOPLE.gerente;
-    say(g, 'Equipe. Relatório. Agora.');
+    say(PEOPLE.gerente, 'Equipe. Relatório. Agora.');
     tourNext();
   }
   function tourNext() {
@@ -654,10 +487,10 @@
       if (!best || d < best.d) best = { x: nx + .5, y: ny + .5, d };
     }
     if (!best) return tourNext();
-    goTo(g, { x: best.x, y: best.y, face: faceFrom(ref.x - best.x, ref.y - best.y), dwell: 1400, onArrive: () => say(w, REPLIES[id]()) });
+    goTo(g, { x: best.x, y: best.y, face: faceFrom(ref.x - best.x, ref.y - best.y), dwell: 1600, onArrive: () => say(w, REPLIES[id]()) });
   }
 
-  // ---------- Conversa espontânea ----------
+  // ---------- Falas ----------
   const CHATTER = [
     () => [PEOPLE.gestor, 'Com grandes orçamentos vêm grandes responsabilidades.'],
     () => [PEOPLE.analista, (() => { const b = [...CAMPAIGNS].sort((a, z) => a.m.cpl - z.m.cpl)[0]; return `NÓS somos dados. ${b.short} é a melhor: CPL ${brl0.format(b.m.cpl)}`; })()],
@@ -667,343 +500,37 @@
     () => [PEOPLE.copy, (() => { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return `"${b.ad.headline}"? Obra-prima. Minha.`; })()],
     () => [PEOPLE.analista, `Connect rate geral: ${pct(total().connect)}. Delicioso.`],
     () => [PEOPLE.gerente, 'Eu não sou o CPL que vocês merecem...'],
-    () => [PEOPLE.copy, 'Oi, você aí do outro lado da tela! 👋'],
+    () => [PEOPLE.copy, 'Ei, você aí girando a câmera! 👋'],
   ];
-  let nextChat = 1500, chatIdx = 0;
+  let nextChat = 2500, chatIdx = 0;
 
-  // ---------- Balões de chat (pilha no topo, como no Habbo) ----------
-  const chat = [];
+  // ---------- Etiquetas e balões (HTML sobre o 3D) ----------
+  for (const id in PEOPLE) {
+    const p = PEOPLE[id];
+    p.tagEl = document.createElement('button');
+    p.tagEl.className = 'nametag'; p.tagEl.type = 'button';
+    p.tagEl.textContent = p.name; p.tagEl.title = label(p);
+    p.tagEl.onclick = () => activate(p);
+    p.bubbleEl = document.createElement('div');
+    p.bubbleEl.className = 'bubble';
+    labelsEl.append(p.tagEl, p.bubbleEl);
+  }
   function say(p, msg) {
-    chat.forEach(m => m.ty -= 17);
-    chat.push({ p, msg, y: 86, ty: 70, born: performance.now() });
-  }
-  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-  function drawChat(t) {
-    for (let i = chat.length - 1; i >= 0; i--) if (chat[i].ty < -20 || t - chat[i].born > 14000) chat.splice(i, 1);
-    for (const m of chat) {
-      m.y += (m.ty - m.y) * .18;
-      const name = m.p.name + ': ';
-      ctx.font = `700 7px ${FONT}`; const nw = ctx.measureText(name).width;
-      ctx.font = `400 7px ${FONT}`; const mw = ctx.measureText(m.msg).width;
-      const w = nw + mw + 22, h = 14, [px] = iso(m.p.pos.x, m.p.pos.y);
-      const x = Math.max(4, Math.min(W - w - 4, px - w / 2)), y = Math.round(m.y);
-      const age = t - m.born; ctx.globalAlpha = age > 12000 ? Math.max(0, 1 - (age - 12000) / 2000) : 1;
-      glow(CY, 6, () => { ctx.fillStyle = CY; roundRect(x - 1, y - 1, w + 2, h + 2, 3); ctx.fill(); });
-      ctx.fillStyle = '#02080d'; roundRect(x, y, w, h, 2); ctx.fill();
-      const tx = Math.max(x + 8, Math.min(x + w - 8, px));
-      ctx.fillStyle = CY; ctx.beginPath(); ctx.moveTo(tx - 4, y + h); ctx.lineTo(tx, y + h + 4); ctx.lineTo(tx + 4, y + h); ctx.fill();
-      ctx.fillStyle = '#02080d'; ctx.beginPath(); ctx.moveTo(tx - 3, y + h - 1); ctx.lineTo(tx, y + h + 2.5); ctx.lineTo(tx + 3, y + h - 1); ctx.fill();
-      R(x + 3, y + 3, 8, 8, '#000'); R(x + 4, y + 4, 6, 6, m.p.look.mask);
-      R(x + 5, y + 6, 2, 2, '#fff'); R(x + 8, y + 6, 1, 2, '#fff');
-      text(name, x + 14, y + 3.5, 7, CY, 700);
-      text(m.msg, x + 14 + nw, y + 3.5, 7, '#e6fdff', 400);
-      ctx.globalAlpha = 1;
-    }
+    p.bubbleEl.innerHTML = `<b>${esc(p.name)}:</b> ${esc(msg)}`;
+    p.bubbleEl.classList.add('show');
+    clearTimeout(p.bubbleT);
+    p.bubbleT = setTimeout(() => p.bubbleEl.classList.remove('show'), 5200);
   }
 
-  // ---------- Avatar estilo Habbo ----------
-  function avatar(p, t) {
-    const L = p.look, sit = p.path.length ? null : p.sitAt;
-    const back = p.face === 'NE' || p.face === 'NW', mirror = p.face === 'SE' || p.face === 'NW';
-    let [x, y] = iso(p.pos.x, p.pos.y); x = Math.round(x); y = Math.round(y);
-    const stepF = p.path.length ? (Math.floor(t / 150) % 2 ? 1 : -1) : 0;
-    if (!sit) { ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x, y, 9, 4, 0, 0, Math.PI * 2); ctx.fill(); }
-    const by = sit ? y - sit.h - 3 : y;
-    ctx.save();
-    if (mirror) { ctx.translate(2 * x, 0); ctx.scale(-1, 1); }
-    if (L.behind && !back) L.behind(x, by, sit);
-    if (!sit) {
-      R(x - 6, by - 14, 12, 12, O);
-      R(x - 5, by - 13 + Math.max(0, stepF), 4, 11 - Math.max(0, stepF), L.legs);
-      R(x + 1, by - 13 + Math.max(0, -stepF), 4, 11 - Math.max(0, -stepF), L.legs);
-      R(x - 6, by - 4 - Math.max(0, -stepF), 5, 4, L.boots); R(x + 1, by - 4 - Math.max(0, stepF), 5, 4, L.boots);
-    } else if (!back) { R(x - 6, by - 4, 12, 5, O); R(x - 5, by - 3, 10, 3, L.legs); }
-    // Tronco
-    R(x - 8, by - 28, 16, 16, O);
-    R(x - 7, by - 27, 14, 14, L.suit);
-    R(x - 7, by - 27, 2, 14, L.side); R(x + 5, by - 27, 2, 14, L.side);
-    if (!back && L.chest) L.chest(x, by);
-    // Braços (digitando na própria mesa)
-    const typing = sit && p.home && !back && p.id !== 'gerente' ? Math.floor(t / 170 + p.seat.x) % 2 : 0;
-    R(x - 10, by - 27, 4, 12, O); R(x + 6, by - 27, 4, 12, O);
-    R(x - 9, by - 26, 2, 9, L.arm); R(x + 7, by - 26, 2, 9, L.arm);
-    R(x - 9, by - 17 - typing, 2, 3, L.gloves); R(x + 7, by - 17 - (sit && p.home && p.id !== 'gerente' ? 1 - typing : 0), 2, 3, L.gloves);
-    // Cabeça grande
-    R(x - 8, by - 43, 16, 16, O);
-    R(x - 7, by - 42, 14, 14, L.mask);
-    R(x - 7, by - 30, 14, 2, 'rgba(0,0,0,.18)');
-    if (back) { if (L.backHead) L.backHead(x, by); } else L.face(x, by, t);
-    if (L.top) L.top(x, by);
-    if (back && L.over) L.over(x, by, sit);
-    ctx.restore();
-    // Etiqueta com o nome
-    ctx.font = `600 6px ${FONT}`;
-    const tw = ctx.measureText(p.name).width + 8, hot = hover === p;
-    R(x - tw / 2, by - 58, tw, 9, hot ? '#ffe066' : 'rgba(0,0,0,.7)');
-    text(p.name, x, by - 57, 6, hot ? '#111' : '#fff', 600, 'center');
-    regions.push({ x: x - 11, y: by - 59, w: 22, h: (sit ? 50 : 60), target: p });
-  }
-
-  // ---------- Sala ----------
-  const TVS = CAMPAIGNS.map((c, i) => ({ c, start: .8 + i * 4, w: 56, h: 44, top: 88 }));
-  const BIG = { big: true, start: 12.75, w: 76, h: 54, top: 94 };
-  let hover = null, hoverTile = null, regions = [];
-
-  // Prédios da vista (fixos)
-  const city = (() => { const r = rng(7); return Array.from({ length: 9 }, (_, i) => ({ x: i * 7 - 2, w: 6 + r() * 3, h: 12 + r() * 26, lit: Array.from({ length: 12 }, () => r() > .55) })); })();
-  function windowView(w, h) {
-    const hr = new Date().getHours(), night = hr < 6 || hr >= 18;
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, night ? '#0b1030' : '#6cc2ff'); g.addColorStop(1, night ? '#2b2f6b' : '#d6f0ff');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    if (night) { R(w * .75, 5, 4, 4, '#f4f1d0'); [[8, 6], [20, 3], [33, 9], [44, 4]].forEach(([a, b]) => R(a, b, 1, 1, '#fff')); }
-    else { R(w * .72, 5, 6, 6, '#fff3a6'); R(8, 8, 12, 3, '#fff'); R(28, 12, 10, 3, '#fff'); }
-    city.forEach(b => {
-      if (b.x > w) return;
-      const bw = Math.min(b.w, w - b.x), y0 = h - b.h;
-      R(b.x, y0, bw, b.h, night ? '#161b36' : '#7d8fa6');
-      b.lit.forEach((on, i) => { const wx = b.x + 1 + (i % 2) * 3, wy = y0 + 2 + Math.floor(i / 2) * 4; if (wx + 1 < b.x + bw && wy < h - 1) R(wx, wy, 1.5, 2, night ? (on ? '#ffd86b' : '#262c50') : (on ? '#cfe3f5' : '#61738a')); });
-    });
-  }
-  function windowFrame(w, h) {
-    glow(CY, 8, () => R(-3, -3, w + 6, h + 6, CY));
-    R(-2, -2, w + 4, h + 4, '#02060b');
-    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip(); windowView(w, h); ctx.restore();
-    R(w / 2 - 1, 0, 2, h, '#02060b'); R(w / 2 - .5, 0, 1, h, 'rgba(0,229,255,.6)');
-  }
-
-  // Ponto a uma distância d ao longo de um caminho fechado (em tiles).
-  function along(pts, d) {
-    let L = 0; const seg = [];
-    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push([a, b, l]); L += l; }
-    d = ((d % L) + L) % L;
-    for (const [a, b, l] of seg) { if (d <= l) return [a[0] + (b[0] - a[0]) * d / l, a[1] + (b[1] - a[1]) * d / l]; d -= l; }
-    return pts[0];
-  }
-  // Moto de luz (Tron): rastro brilhante percorrendo as linhas do piso.
-  function lightCycle(pts, t, speed, color) {
-    const head = t * speed, N = 26, len = 3.2;
-    for (let i = N; i > 0; i--) {
-      const a = along(pts, head - len * i / N), b = along(pts, head - len * (i - 1) / N);
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > .5) continue;
-      ctx.globalAlpha = 1 - i / N;
-      glow(color, 8, () => { ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(...iso(a[0], a[1])); ctx.lineTo(...iso(b[0], b[1])); ctx.stroke(); });
-    }
-    ctx.globalAlpha = 1;
-    const p = along(pts, head);
-    glow('#fff', 10, () => { const [x, y] = iso(p[0], p[1]); R(x - 1.5, y - 1.5, 3, 3, '#ffffff'); });
-  }
-  const neonLine = (pts, color, width = 1.2, blur = 8) => glow(color, blur, () => {
-    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke();
-  });
-
-  function drawRoom(t) {
-    const L0 = iso(0, GY, 0), L1 = iso(0, 0, 0), R1 = iso(GX, 0, 0), F = iso(GX, GY, 0);
-    // Paredes escuras com espessura
-    poly([L0, L1, iso(0, 0, WALL), iso(0, GY, WALL)].map(([x, y]) => [x - 6, y - 3]), '#010306');
-    poly([L1, R1, iso(GX, 0, WALL), iso(0, 0, WALL)].map(([x, y]) => [x + 6, y - 3]), '#010306');
-    poly([L0, L1, iso(0, 0, WALL), iso(0, GY, WALL)], '#060d17');
-    poly([L1, R1, iso(GX, 0, WALL), iso(0, 0, WALL)], '#040a13');
-    // Painéis em grade na parede
-    ctx.lineWidth = .6; ctx.strokeStyle = 'rgba(0,229,255,.13)';
-    for (let i = 1; i < GY; i++) { ctx.beginPath(); ctx.moveTo(...iso(0, i, 4)); ctx.lineTo(...iso(0, i, WALL - 8)); ctx.stroke(); }
-    for (let i = 1; i < GX; i++) { ctx.beginPath(); ctx.moveTo(...iso(i, 0, 4)); ctx.lineTo(...iso(i, 0, WALL - 8)); ctx.stroke(); }
-    for (const hh of [56, 80]) { ctx.beginPath(); ctx.moveTo(...iso(0, GY, hh)); ctx.lineTo(...iso(0, 0, hh)); ctx.lineTo(...iso(GX, 0, hh)); ctx.stroke(); }
-    // Faixas de neon: friso, rodapé e topo
-    neonLine([iso(0, GY, 30), iso(0, 0, 30), iso(GX, 0, 30)], CY, 1.2, 8);
-    neonLine([iso(0, GY, 4), iso(0, 0, 4), iso(GX, 0, 4)], OR, 1, 6);
-    // Topo da parede
-    poly([iso(0, GY, WALL), iso(0, 0, WALL), [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3], [iso(0, GY, WALL)[0] - 6, iso(0, GY, WALL)[1] - 3]], '#0a1522');
-    poly([iso(0, 0, WALL), iso(GX, 0, WALL), [iso(GX, 0, WALL)[0] + 6, iso(GX, 0, WALL)[1] - 3], [iso(0, 0, WALL)[0], iso(0, 0, WALL)[1] - 3]], '#08121d');
-    neonLine([iso(0, GY, WALL - 6), iso(0, 0, WALL - 6), iso(GX, 0, WALL - 6)], CY, 2, 12);
-    // Pulso de luz correndo pelo topo das paredes
-    {
-      const wallPath = [[0, GY], [0, 0], [GX, 0]];
-      const total = GY + GX, d = (t / 9) % total;
-      const at = s => s < GY ? [0, GY - s] : [s - GY, 0];
-      const [ax, ay] = at(Math.max(0, d - 1.5)), [bx, by] = at(d);
-      neonLine([iso(ax, ay, WALL - 6), iso(bx, by, WALL - 6)], '#e6fdff', 2.4, 16);
-      void wallPath;
-    }
-
-    // Piso: grade Tron
-    poly([L0, F, [F[0], F[1] + 8], [L0[0], L0[1] + 8]], '#010407');
-    poly([R1, F, [F[0], F[1] + 8], [R1[0], R1[1] + 8]], '#02060a');
-    poly([L1, R1, F, L0], '#02070d');
-    ctx.lineWidth = .7;
-    for (let i = 0; i <= GX; i++) { ctx.strokeStyle = i % 3 ? 'rgba(0,229,255,.18)' : 'rgba(0,229,255,.38)'; ctx.beginPath(); ctx.moveTo(...iso(i, 0)); ctx.lineTo(...iso(i, GY)); ctx.stroke(); }
-    for (let j = 0; j <= GY; j++) { ctx.strokeStyle = j % 3 ? 'rgba(0,229,255,.18)' : 'rgba(0,229,255,.38)'; ctx.beginPath(); ctx.moveTo(...iso(0, j)); ctx.lineTo(...iso(GX, j)); ctx.stroke(); }
-    neonLine([L0, F, R1], CY, 1.4, 10);
-    neonLine([[L0[0], L0[1] + 8], [F[0], F[1] + 8], [R1[0], R1[1] + 8]], 'rgba(0,229,255,.5)', .8, 6);
-    // Áreas marcadas com neon (lounge e reunião)
-    neonLine([iso(12.4, 1.6), iso(17.6, 1.6), iso(17.6, 5.6), iso(12.4, 5.6), iso(12.4, 1.6)], CY, 1, 8);
-    neonLine([iso(5.7, 5.7), iso(11.3, 5.7), iso(11.3, 10.3), iso(5.7, 10.3), iso(5.7, 5.7)], OR, 1, 8);
-    neonLine([iso(.8, 7.9), iso(4.6, 7.9), iso(4.6, 11.2), iso(.8, 11.2), iso(.8, 7.9)], 'rgba(0,229,255,.7)', .8, 6);
-    // Motos de luz
-    lightCycle([[5, 5], [12, 5], [12, 11], [5, 11]], t, .0016, OR);
-    lightCycle([[0, 13], [0, 5], [5, 5], [5, 1], [12, 1], [12, 13]], t + 4000, .0019, CY);
-
-    // Cursor de tile
-    if (hoverTile) {
-      const [gx, gy] = hoverTile;
-      poly([iso(gx, gy), iso(gx + 1, gy), iso(gx + 1, gy + 1), iso(gx, gy + 1)], 'rgba(0,229,255,.18)');
-      glow(CY, 8, () => { ctx.lineWidth = 1.2; ctx.strokeStyle = CY; ctx.stroke(); });
-    }
-
-    // ---- Parede esquerda: janelas, neon, ar-condicionado, quadro e relógio ----
-    onWall('L', 13.4, 84, () => windowFrame(58, 50));
-    onWall('L', 4.9, 70, () => windowFrame(44, 40));
-    // Ar-condicionado com ventinho animado
-    onWall('L', 4.9, 96, () => {
-      glow(CY, 6, () => R(-1, -1, 46, 17, CY)); R(0, 0, 44, 15, '#08121c'); R(0, 11, 44, 4, '#050b12');
-      for (let i = 0; i < 5; i++) R(4 + i * 7, 12, 5, 1, 'rgba(0,229,255,.5)');
-      R(36, 3, 5, 3, '#000'); text('23°', 38.5, 3.2, 3.5, CY, 700, 'center');
-      R(4, 4, 2, 2, Math.floor(t / 800) % 2 ? '#3ddc84' : '#1f8a50');
-      ctx.strokeStyle = 'rgba(0,229,255,.7)'; ctx.lineWidth = .8;
-      for (let i = 0; i < 3; i++) { const ph = (t / 600 + i / 3) % 1; ctx.globalAlpha = 1 - ph; ctx.beginPath(); ctx.moveTo(8 + i * 12, 17 + ph * 10); ctx.quadraticCurveTo(12 + i * 12, 19 + ph * 10, 16 + i * 12, 17 + ph * 10); ctx.stroke(); }
-      ctx.globalAlpha = 1;
-    });
-    // Letreiro neon
-    onWall('L', 9.2, 98, () => {
-      const flick = Math.sin(t / 90) > -.97;
-      glow(OR, flick ? 12 : 2, () => text('TRÁFEGO', 29, 3, 9, flick ? '#ffb347' : '#6b4310', 700, 'center'));
-      glow(CY, 10, () => text('PAGO ◆ LEADS', 29, 13, 6, '#9ff6ff', 700, 'center'));
-    });
-    // Painel com a meta
-    const tt = total();
-    onWall('L', 9, 66, () => {
-      glow(OR, 8, () => R(-2, -2, 52, 36, OR)); R(-1, -1, 50, 34, '#02060b');
-      text('META CPL', 24, 3, 5.5, '#ffb347', 700, 'center');
-      glow(CY, 6, () => text(brl0.format(metaCPL), 24, 9, 10, '#e6fdff', 700, 'center'));
-      text(int.format(tt.leads) + ' leads · 7d', 24, 22, 5, '#7fd8e6', 600, 'center');
-    });
-    // Relógio
-    onWall('L', 1.8, 92, () => {
-      glow(CY, 6, () => R(-1, -1, 18, 18, CY)); R(0, 0, 16, 16, '#02060b');
-      const now = new Date(), cx = 8, cy = 8;
-      ctx.strokeStyle = CY; ctx.lineWidth = 1.2;
-      const hand = (a, l) => { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(a) * l, cy - Math.cos(a) * l); ctx.stroke(); };
-      hand((now.getHours() % 12 + now.getMinutes() / 60) / 12 * Math.PI * 2, 3.2);
-      ctx.strokeStyle = OR; hand(now.getMinutes() / 60 * Math.PI * 2, 4.8);
-    });
-  }
-
-  function drawTV(tv, t) {
-    const { c, start, w, h, top } = tv;
-    const st = statusOf(c.m.cpl), col = STATUS[st].color, hot = hover === tv;
-    onWall('R', start, top, () => {
-      glow(col, 12, () => R(-1, -1, w + 2, h + 2, hot ? '#ffe066' : '#000'));
-      R(0, 0, w, h, '#1b1b1b');
-      R(2, 2, w - 4, h - 8, '#0d1b2a');
-      text(c.short.toUpperCase(), 5, 4, 6, '#c3c2b7', 600);
-      text('CPL', 5, 12, 5, '#8c8b82', 600);
-      text(brl0.format(c.m.cpl), 5, 17, 9, '#ffffff', 700);
-      const vals = c.daily.map(d => d.leads), mx = Math.max(...vals, 1);
-      vals.forEach((v, i) => { const bh = Math.max(1, v / mx * 7); R(5 + i * 5, 35 - bh, 3, bh, '#3987e5'); });
-      const on = st !== 'critical' || Math.floor(t / 400) % 2 === 0;
-      R(w - 12, 4, 8, 8, on ? col : '#3a1010');
-      if (on) text(STATUS[st].icon, w - 8, 4.5, 6, st === 'warning' ? '#111' : '#fff', 700, 'center');
-      R(2, h - 5, w - 4, 3, col);
-    });
-    const [x0, y0] = iso(start, 0, top);
-    regions.push({ x: x0, y: y0, w, h: h + w / 2, target: tv });
-  }
-
-  function drawBigTV(t) {
-    const tt = total(), st = statusOf(tt.cpl), col = STATUS[st].color, hot = hover === BIG;
-    onWall('R', BIG.start, BIG.top, () => {
-      const { w, h } = BIG;
-      glow('#4fc3ff', 14, () => R(-2, -2, w + 4, h + 4, hot ? '#ffe066' : '#000'));
-      R(0, 0, w, h, '#1b1b1b'); R(2, 2, w - 4, h - 4, '#08131f');
-      text('PAINEL GERAL · 7 DIAS', 5, 4, 5.5, '#8ff0ff', 700);
-      text('LEADS', 5, 12, 4.5, '#8c8b82', 600); text(int.format(tt.leads), 5, 17, 9, '#fff', 700);
-      text('INVEST.', 30, 12, 4.5, '#8c8b82', 600); text(brl0.format(tt.spend), 30, 17, 7, '#fff', 700);
-      text('CPL MÉDIO', 5, 28, 4.5, '#8c8b82', 600); text(money(tt.cpl), 5, 33, 7, '#fff', 700);
-      R(w - 12, 28, 8, 8, col); text(STATUS[st].icon, w - 8, 28.5, 6, st === 'warning' ? '#111' : '#fff', 700, 'center');
-      const vals = allDaily.map(d => d.leads), mx = Math.max(...vals, 1);
-      vals.forEach((v, i) => { const bh = Math.max(1, v / mx * 8); R(40 + i * 4, 49 - bh, 3, bh, '#4fc3ff'); });
-      R(2, h - 3, w - 4, 1, col);
-    });
-    const [x0, y0] = iso(BIG.start, 0, BIG.top);
-    regions.push({ x: x0, y: y0, w: BIG.w, h: BIG.h + BIG.w / 2, target: BIG });
-  }
-
-  // ---------- Ordem de desenho (pintor isométrico) ----------
-  function behind(A, B) { return A[2] <= B[0] + 1e-6 || A[3] <= B[1] + 1e-6; }
-  function depthSort(items) {
-    const n = items.length, after = items.map(() => []), indeg = new Array(n).fill(0);
-    const key = it => it.fp[0] + it.fp[2] + it.fp[1] + it.fp[3];
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      const A = items[i].fp, B = items[j].fp;
-      const ab = behind(A, B), ba = behind(B, A);
-      let first;
-      if (ab && !ba) first = i; else if (ba && !ab) first = j;
-      else if (!ab && !ba) { const dl = items[i].layer - items[j].layer; first = dl ? (dl < 0 ? i : j) : (key(items[i]) <= key(items[j]) ? i : j); }
-      else continue;
-      const second = first === i ? j : i;
-      after[first].push(second); indeg[second]++;
-    }
-    const out = [], ready = [], used = new Array(n).fill(false);
-    for (let i = 0; i < n; i++) if (!indeg[i]) ready.push(i);
-    while (out.length < n) {
-      let pick;
-      if (ready.length) { ready.sort((a, b) => key(items[a]) - key(items[b])); pick = ready.shift(); }
-      else { pick = -1; for (let i = 0; i < n; i++) if (!used[i] && (pick < 0 || key(items[i]) < key(items[pick]))) pick = i; }
-      if (used[pick]) continue;
-      used[pick] = true; out.push(items[pick]);
-      for (const v of after[pick]) if (--indeg[v] === 0 && !used[v]) ready.push(v);
-    }
-    return out;
-  }
-
-  // ---------- Loop ----------
-  let last = performance.now();
-  function frame(t) {
-    const dt = Math.min(60, t - last); last = t;
-    for (const id in PEOPLE) step(PEOPLE[id], dt);
-    if (!tour && t > nextChat && !backdrop.classList.contains('open')) { const [p, m] = CHATTER[chatIdx++ % CHATTER.length](); say(p, m); nextChat = t + 5500; }
-
-    regions = [];
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(K, 0, 0, K, 0, 0);
-    drawRoom(t);
-    TVS.forEach(tv => drawTV(tv, t));
-    drawBigTV(t);
-
-    const items = furniture.slice();
-    for (const id in PEOPLE) {
-      const p = PEOPLE[id], r = .16;
-      items.push({ fp: [p.pos.x - r, p.pos.y - r, p.pos.x + r, p.pos.y + r], layer: 1, draw: () => avatar(p, t) });
-    }
-    depthSort(items).forEach(i => i.draw());
-    drawChat(t);
-    requestAnimationFrame(frame);
-  }
-
-  // ---------- Clique / hover ----------
-  function toLogical(e) { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; }
-  function hitTest(x, y) {
-    for (let i = regions.length - 1; i >= 0; i--) { const g = regions[i]; if (x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + g.h) return g.target; }
-    return null;
-  }
-  canvas.addEventListener('mousemove', e => {
-    const [x, y] = toLogical(e);
-    hover = hitTest(x, y);
-    canvas.style.cursor = hover ? 'pointer' : 'default';
-    const a = (x - OX) / (TW / 2), b = (y - OY) / (TH / 2), gx = Math.floor((a + b) / 2), gy = Math.floor((b - a) / 2);
-    hoverTile = gx >= 0 && gy >= 0 && gx < GX && gy < GY ? [gx, gy] : null;
-  });
-  canvas.addEventListener('mouseleave', () => { hover = null; hoverTile = null; });
-  canvas.addEventListener('click', e => { const h = hitTest(...toLogical(e)); if (h) activate(h); });
-
+  // ---------- Atalhos ----------
+  const TVS = CAMPAIGNS.map((c, i) => ({ c, x: 2.5 + i * 4 }));
+  const BIG = { big: true };
   function activate(h) {
     if (h.big) return openGerente();
     if (h.c) return openTV(h.c);
     if (h.id === 'gerente') return startTour();
     ({ gestor: openGestor, copy: openCopy, analista: openAnalista })[h.id]();
   }
-
   const toolbar = document.getElementById('toolbar');
   TVS.forEach(tv => { const b = document.createElement('button'); b.textContent = '📺 ' + tv.c.short; b.title = tv.c.name; b.onclick = () => activate(tv); toolbar.appendChild(b); });
   { const b = document.createElement('button'); b.textContent = '🖥️ Painel geral'; b.onclick = () => activate(BIG); toolbar.appendChild(b); }
@@ -1011,6 +538,586 @@
     const p = PEOPLE[id], b = document.createElement('button');
     b.textContent = `${p.emoji} ${p.name}`; b.title = p.role; b.onclick = () => activate(p); toolbar.appendChild(b);
   });
+
+  if (HAS3D) build3D();
+
+  function build3D() {
+    const T = THREE;
+    const renderer = new T.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.outputEncoding = T.sRGBEncoding;
+    renderer.toneMapping = T.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    const hour = new Date().getHours(), night = hour < 6 || hour >= 18;
+    const scene = new T.Scene();
+    scene.background = new T.Color(night ? '#0b1530' : '#9fd3f7');
+    scene.fog = new T.Fog(scene.background, 45, 90);
+
+    const camera = new T.PerspectiveCamera(32, 16 / 10, .1, 200);
+    const controls = new T.OrbitControls(camera, canvas);
+    const HOME = { target: new T.Vector3(9, .6, 7), az: Math.PI / 4, polar: 0.98, dist: 27 };
+    function placeCamera(az, polar, dist) {
+      const t = controls.target;
+      camera.position.set(t.x + dist * Math.sin(polar) * Math.sin(az), t.y + dist * Math.cos(polar), t.z + dist * Math.sin(polar) * Math.cos(az));
+      camera.lookAt(t);
+    }
+    controls.target.copy(HOME.target);
+    placeCamera(HOME.az, HOME.polar, HOME.dist);
+    Object.assign(controls, { enableDamping: true, dampingFactor: .08, minDistance: 7, maxDistance: 42, minPolarAngle: .3, maxPolarAngle: 1.36, screenSpacePanning: false, rotateSpeed: .6 });
+    controls.update();
+
+    // ---------- Luzes ----------
+    scene.add(new T.HemisphereLight(night ? '#6f86c9' : '#dff1ff', '#8a6f55', night ? .45 : .75));
+    const sun = new T.DirectionalLight(night ? '#9fb4ff' : '#fff1d6', night ? .45 : 1.35);
+    sun.position.set(-14, 26, 18);
+    sun.target.position.set(9, 0, 7);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 70 });
+    sun.shadow.bias = -.0005; sun.shadow.normalBias = .02;
+    scene.add(sun, sun.target);
+    scene.add(new T.AmbientLight('#ffffff', night ? .12 : .18));
+
+    // ---------- Helpers ----------
+    const mat = (color, o = {}) => new T.MeshStandardMaterial({ color, roughness: .75, metalness: 0, ...o });
+    const glowMat = (color, intensity = 1.4) => new T.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: intensity, roughness: .4 });
+    const basic = (map, o = {}) => new T.MeshBasicMaterial({ map, toneMapped: false, ...o });
+    function add(geo, m, x, y, z, parent = scene, shadow = true) {
+      const o = new T.Mesh(geo, m); o.position.set(x, y, z);
+      o.castShadow = shadow; o.receiveShadow = true; parent.add(o); return o;
+    }
+    // Caixa pela "pegada" no chão: [x, z] canto, largura (x), profundidade (z), altura, base y
+    const boxAt = (x, z, w, d, h, y0, m, parent = scene) => add(new T.BoxGeometry(w, h, d), m, x + w / 2, y0 + h / 2, z + d / 2, parent);
+    const cyl = (r, h, x, y0, z, m, parent = scene, seg = 20, r2 = r) => add(new T.CylinderGeometry(r, r2, h, seg), m, x, y0 + h / 2, z, parent);
+    function canvasTex(w, h, draw) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const g = c.getContext('2d'); draw(g, w, h);
+      const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; t.anisotropy = 4;
+      t.redraw = fn => { fn(g, w, h); t.needsUpdate = true; };
+      return t;
+    }
+    const clickables = [];
+    const tag = (o, target) => { o.userData.target = target; clickables.push(o); return o; };
+
+    // ---------- Terreno e piso ----------
+    const grass = canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = night ? '#1f3a24' : '#5fa04a'; g.fillRect(0, 0, w, h);
+      const r = rng(3);
+      for (let i = 0; i < 1600; i++) { g.fillStyle = `rgba(${night ? '20,50,25' : '40,110,40'},${.25 + r() * .4})`; g.fillRect(r() * w, r() * h, 2, 3 + r() * 4); }
+    });
+    grass.wrapS = grass.wrapT = T.RepeatWrapping; grass.repeat.set(30, 30);
+    const ground = add(new T.PlaneGeometry(160, 160), mat('#ffffff', { map: grass }), 9, -.02, 7, scene, false);
+    ground.rotation.x = -Math.PI / 2;
+    // Calçada ao redor
+    boxAt(-1.2, -1.2, GX + 2.4, GY + 2.4, .03, -.045, mat('#cfc8bb'));
+
+    const wood = canvasTex(1024, 1024, (g, w, h) => {
+      const r = rng(11), rowH = 64;
+      for (let y = 0; y < h; y += rowH) {
+        let x = -Math.floor(r() * 300);
+        while (x < w) {
+          const len = 220 + r() * 260, tone = 150 + r() * 40;
+          g.fillStyle = `rgb(${tone + 20},${tone * .66 | 0},${tone * .4 | 0})`; g.fillRect(x, y, len, rowH);
+          for (let k = 0; k < 6; k++) { g.strokeStyle = `rgba(90,50,25,${.08 + r() * .12})`; g.lineWidth = 1 + r() * 2; g.beginPath(); const yy = y + r() * rowH; g.moveTo(x, yy); g.bezierCurveTo(x + len * .3, yy + r() * 8 - 4, x + len * .6, yy + r() * 8 - 4, x + len, yy); g.stroke(); }
+          g.fillStyle = 'rgba(60,30,15,.55)'; g.fillRect(x, y, 2, rowH);
+          x += len;
+        }
+        g.fillStyle = 'rgba(60,30,15,.6)'; g.fillRect(0, y, w, 2);
+      }
+    });
+    wood.wrapS = wood.wrapT = T.RepeatWrapping; wood.repeat.set(GX / 4, GY / 4);
+    boxAt(0, 0, GX, GY, .1, -.1, mat('#ffffff', { map: wood, roughness: .55 }));
+
+    function rug(x, z, w, d, base, border, pattern) {
+      const t = canvasTex(512, 512 * d / w, (g, W, H) => {
+        g.fillStyle = border; g.fillRect(0, 0, W, H);
+        g.fillStyle = base; g.fillRect(18, 18, W - 36, H - 36);
+        g.strokeStyle = pattern; g.lineWidth = 4; g.strokeRect(34, 34, W - 68, H - 68);
+        g.globalAlpha = .35; for (let i = 60; i < W - 60; i += 40) for (let j = 60; j < H - 60; j += 40) { g.fillStyle = pattern; g.fillRect(i, j, 6, 6); }
+        g.globalAlpha = 1;
+      });
+      boxAt(x, z, w, d, .015, 0, mat('#ffffff', { map: t, roughness: .95 }));
+    }
+    rug(12.4, 1.6, 5.2, 4, '#1f5c63', '#123b40', '#7fd4d9');
+    rug(5.7, 5.7, 5.6, 4.6, '#7a2e3b', '#4d1b25', '#e7b77a');
+    rug(.8, 7.9, 3.8, 3.3, '#5a5f66', '#3a3e44', '#b9c2cc');
+
+    // ---------- Paredes (abaixam quando ficam na frente da câmera) ----------
+    const wallPaint = canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = '#efe5d3'; g.fillRect(0, 0, w, h);
+      const r = rng(5); for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(150,120,90,${r() * .06})`; g.fillRect(r() * w, r() * h, 2, 2); }
+    });
+    wallPaint.wrapS = wallPaint.wrapT = T.RepeatWrapping; wallPaint.repeat.set(4, 1);
+    const paintM = mat('#ffffff', { map: wallPaint, roughness: .9 });
+    const wainM = mat('#6e4a33', { roughness: .6 }), trimM = mat('#f4efe6', { roughness: .5 }), capM = mat('#d8cdbb');
+    const walls = [];
+    function makeWall(axis, at, len, inward) {
+      const full = new T.Group(), low = new T.Group(), th = .15;
+      const off = inward > 0 ? -th : 0;   // parede fica do lado de fora do piso
+      const put = (grp, h) => {
+        const geo = new T.BoxGeometry(axis === 'x' ? th : len + th * 2, h, axis === 'x' ? len + th * 2 : th);
+        const m = add(geo, paintM, axis === 'x' ? at + off + th / 2 : len / 2, h / 2, axis === 'x' ? len / 2 : at + off + th / 2, grp);
+        add(axis === 'x' ? new T.BoxGeometry(th + .02, .08, len + th * 2) : new T.BoxGeometry(len + th * 2, .08, th + .02), capM, m.position.x, h + .04, m.position.z, grp);
+        return m;
+      };
+      put(full, WALL_H); put(low, .35);
+      // Lambri de madeira e friso na face interna
+      const face = axis === 'x' ? at + (inward > 0 ? .02 : -.02) : at + (inward > 0 ? .02 : -.02);
+      const wg = axis === 'x' ? new T.BoxGeometry(.04, 1, len) : new T.BoxGeometry(len, 1, .04);
+      add(wg, wainM, axis === 'x' ? face : len / 2, .5, axis === 'x' ? len / 2 : face, full);
+      const tg = axis === 'x' ? new T.BoxGeometry(.07, .06, len) : new T.BoxGeometry(len, .06, .07);
+      add(tg, trimM, axis === 'x' ? face : len / 2, 1.02, axis === 'x' ? len / 2 : face, full);
+      add(axis === 'x' ? new T.BoxGeometry(.06, .12, len) : new T.BoxGeometry(len, .12, .06), trimM, axis === 'x' ? face : len / 2, .06, axis === 'x' ? len / 2 : face, low);
+      // LED discreto no alto (toque Tron)
+      add(axis === 'x' ? new T.BoxGeometry(.03, .03, len) : new T.BoxGeometry(len, .03, .03), glowMat(CY, 1.6), axis === 'x' ? face : len / 2, WALL_H - .12, axis === 'x' ? len / 2 : face, full, false);
+      scene.add(full, low);
+      const wall = { axis, at, inward, full, low };
+      walls.push(wall);
+      return wall;
+    }
+    const wallL = makeWall('x', 0, GY, 1);      // esquerda (x = 0)
+    const wallB = makeWall('z', 0, GX, 1);      // fundo (z = 0)
+    const wallR = makeWall('x', GX, GY, -1);    // frente-direita (x = 18)
+    const wallF = makeWall('z', GY, GX, -1);    // frente-esquerda (z = 14)
+
+    // Objeto preso na face interna de uma parede. u = posição ao longo da parede, y = altura do centro.
+    function onWall(wall, u, y, obj, depth = 0) {
+      const d = wall.inward * (.02 + depth);
+      if (wall.axis === 'x') { obj.position.set(wall.at + d, y, u); obj.rotation.y = wall.inward > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      else { obj.position.set(u, y, wall.at + d); obj.rotation.y = wall.inward > 0 ? 0 : Math.PI; }
+      wall.full.add(obj);
+      return obj;
+    }
+    // Plano com textura de canvas (frente = +z local)
+    const panel = (w, h, tex, o = {}) => new T.Mesh(new T.PlaneGeometry(w, h), basic(tex, o));
+
+    // ---------- Janelas com vista da cidade ----------
+    const city = (() => { const r = rng(7); return Array.from({ length: 14 }, (_, i) => ({ x: i * 40 - 10, w: 30 + r() * 18, h: 60 + r() * 140, lit: Array.from({ length: 40 }, () => r() > .55) })); })();
+    const viewTex = canvasTex(512, 320, (g, w, h) => {
+      const gr = g.createLinearGradient(0, 0, 0, h);
+      gr.addColorStop(0, night ? '#0b1030' : '#5fb6f0'); gr.addColorStop(1, night ? '#2b2f6b' : '#d6f0ff');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      if (night) { g.fillStyle = '#f4f1d0'; g.beginPath(); g.arc(w * .78, 50, 18, 0, 7); g.fill(); }
+      else { g.fillStyle = '#fff6c4'; g.beginPath(); g.arc(w * .8, 55, 26, 0, 7); g.fill(); g.fillStyle = 'rgba(255,255,255,.9)'; g.fillRect(60, 60, 90, 18); g.fillRect(200, 90, 70, 14); }
+      city.forEach(b => {
+        const y0 = h - b.h; g.fillStyle = night ? '#161b36' : '#7d8fa6'; g.fillRect(b.x, y0, b.w, b.h);
+        b.lit.forEach((on, i) => { const wx = b.x + 4 + (i % 3) * 9, wy = y0 + 8 + Math.floor(i / 3) * 14; if (wx + 5 < b.x + b.w && wy < h - 6) { g.fillStyle = night ? (on ? '#ffd86b' : '#262c50') : (on ? '#cfe3f5' : '#61738a'); g.fillRect(wx, wy, 5, 8); } });
+      });
+    });
+    function windowOn(wall, u, y, w, h) {
+      const grp = new T.Group();
+      const frameM = mat('#fbfbf8', { roughness: .4 });
+      add(new T.BoxGeometry(w + .16, .08, .12), frameM, 0, h / 2 + .04, 0, grp);
+      add(new T.BoxGeometry(w + .24, .08, .22), frameM, 0, -h / 2 - .04, .05, grp);
+      add(new T.BoxGeometry(.08, h, .12), frameM, -w / 2 - .04, 0, 0, grp);
+      add(new T.BoxGeometry(.08, h, .12), frameM, w / 2 + .04, 0, 0, grp);
+      add(new T.BoxGeometry(.05, h, .1), frameM, 0, 0, 0, grp);
+      const v = panel(w, h, viewTex); v.position.z = -.01; grp.add(v);
+      const glass = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshStandardMaterial({ color: '#cfefff', transparent: true, opacity: .12, roughness: .05, metalness: .6 }));
+      glass.position.z = .02; grp.add(glass);
+      return onWall(wall, u, y, grp);
+    }
+    windowOn(wallL, 11.5, 1.75, 3, 1.5);
+    windowOn(wallL, 3.2, 1.6, 2.2, 1.2);
+    windowOn(wallR, 4, 1.7, 3, 1.5); windowOn(wallR, 10, 1.7, 3, 1.5);
+    windowOn(wallF, 4, 1.7, 3, 1.5);
+    // Porta
+    { const grp = new T.Group(); add(new T.BoxGeometry(1.1, 2.2, .08), mat('#8a5a3a', { roughness: .5 }), 0, 0, 0, grp); add(new T.SphereGeometry(.04), mat('#d9b25b', { metalness: .8, roughness: .3 }), .42, 0, .06, grp); onWall(wallF, 11.5, 1.1, grp); }
+
+    // ---------- TVs com os dados ----------
+    function drawTV(g, W, H, c, t) {
+      const st = statusOf(c.m.cpl), col = STATUS[st].color;
+      g.fillStyle = '#0b1622'; g.fillRect(0, 0, W, H);
+      g.fillStyle = '#9fb6c6'; g.font = '700 30px Orbitron, sans-serif'; g.textBaseline = 'top'; g.fillText(c.short.toUpperCase(), 24, 20);
+      g.fillStyle = '#7f95a5'; g.font = '600 22px Orbitron, sans-serif'; g.fillText('CPL · 7 DIAS', 24, 66);
+      g.fillStyle = '#ffffff'; g.font = '800 58px Orbitron, sans-serif'; g.fillText(brl0.format(c.m.cpl), 24, 96);
+      g.fillStyle = '#9fb6c6'; g.font = '600 22px system-ui, sans-serif'; g.fillText(`${int.format(c.m.leads)} leads · ${brl0.format(c.m.spend)}`, 24, 168);
+      const vals = c.daily.map(d => d.leads), mx = Math.max(...vals, 1);
+      vals.forEach((v, i) => { const bh = Math.max(4, v / mx * 60); g.fillStyle = '#3aa0ff'; g.fillRect(24 + i * 36, 268 - bh, 24, bh); });
+      const on = st !== 'critical' || Math.floor(t / 500) % 2 === 0;
+      g.fillStyle = on ? col : '#3a1010'; g.beginPath(); g.arc(W - 50, 46, 24, 0, 7); g.fill();
+      g.fillStyle = st === 'warning' ? '#111' : '#fff'; g.font = '800 30px system-ui'; g.textAlign = 'center'; g.fillText(STATUS[st].icon, W - 50, 30); g.textAlign = 'left';
+      g.fillStyle = col; g.fillRect(0, H - 14, W, 14);
+      g.fillStyle = '#ffffff'; g.font = '700 20px system-ui'; g.textAlign = 'right'; g.fillText(STATUS[st].label, W - 24, 232); g.textAlign = 'left';
+    }
+    function tvOn(wall, u, y, w, h, drawFn, target) {
+      const grp = new T.Group();
+      add(new T.BoxGeometry(w + .08, h + .08, .07), mat('#151518', { roughness: .3, metalness: .4 }), 0, 0, 0, grp);
+      const tex = canvasTex(512, 300, (g, W, H) => drawFn(g, W, H, 0));
+      const scr = panel(w, h, tex); scr.position.z = .037; grp.add(scr);
+      tag(scr, target);
+      const ledBar = add(new T.BoxGeometry(w, .025, .02), glowMat(CY, 2), 0, -h / 2 - .08, .02, grp, false);
+      onWall(wall, u, y, grp);
+      return { tex, drawFn, ledBar };
+    }
+    const screens = TVS.map(tv => tvOn(wallB, tv.x, 1.95, 2.1, 1.23, (g, W, H, t) => drawTV(g, W, H, tv.c, t), tv));
+    const bigScreen = tvOn(wallB, 15, 1.95, 3.2, 1.8, (g, W, H) => {
+      const tt = total(), st = statusOf(tt.cpl), col = STATUS[st].color;
+      g.fillStyle = '#06101a'; g.fillRect(0, 0, W, H);
+      g.fillStyle = CY; g.font = '800 26px Orbitron, sans-serif'; g.textBaseline = 'top'; g.fillText('PAINEL GERAL · 7 DIAS', 22, 18);
+      const kv = (k, v, x, y) => { g.fillStyle = '#7f95a5'; g.font = '600 18px Orbitron, sans-serif'; g.fillText(k, x, y); g.fillStyle = '#fff'; g.font = '800 36px Orbitron, sans-serif'; g.fillText(v, x, y + 24); };
+      kv('LEADS', int.format(tt.leads), 22, 66); kv('INVESTIMENTO', brl0.format(tt.spend), 200, 66); kv('CPL MÉDIO', money(tt.cpl), 22, 146);
+      g.fillStyle = col; g.beginPath(); g.arc(W - 46, 170, 20, 0, 7); g.fill();
+      const vals = allDaily.map(d => d.leads), mx = Math.max(...vals, 1);
+      vals.forEach((v, i) => { const bh = Math.max(4, v / mx * 50); g.fillStyle = CY; g.fillRect(300 + i * 26, 280 - bh, 18, bh); });
+      g.fillStyle = col; g.fillRect(0, H - 8, W, 8);
+    }, BIG);
+
+    // ---------- Decoração das paredes ----------
+    const posterTex = canvasTex(256, 192, (g, W, H) => {
+      g.fillStyle = '#fffaf0'; g.fillRect(0, 0, W, H);
+      g.fillStyle = '#e07b22'; g.fillRect(0, 0, W, 34);
+      g.fillStyle = '#fff'; g.font = '800 20px Orbitron, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'top'; g.fillText('META DE CPL', W / 2, 7);
+      g.fillStyle = '#111'; g.font = '800 46px Orbitron, sans-serif'; g.fillText(brl0.format(metaCPL), W / 2, 62);
+      g.fillStyle = '#555'; g.font = '600 18px system-ui'; g.fillText(`${int.format(total().leads)} leads nos últimos 7 dias`, W / 2, 140);
+    });
+    { const grp = new T.Group(); add(new T.BoxGeometry(1.5, 1.14, .05), mat('#2b2b2b'), 0, 0, 0, grp); const p = panel(1.4, 1.04, posterTex); p.position.z = .03; grp.add(p); onWall(wallL, 7.4, 1.75, grp); }
+    const neonTex = canvasTex(512, 160, (g, W, H) => {
+      g.clearRect(0, 0, W, H); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.shadowColor = OR; g.shadowBlur = 24; g.fillStyle = '#ffd08a'; g.font = '800 64px Orbitron, sans-serif'; g.fillText('TRÁFEGO', W / 2, 56);
+      g.shadowColor = CY; g.fillStyle = '#b8f9ff'; g.font = '700 36px Orbitron, sans-serif'; g.fillText('PAGO ◆ LEADS', W / 2, 120);
+    });
+    onWall(wallL, 7.4, 2.72, panel(1.9, .6, neonTex, { transparent: true }));
+    // Ar-condicionado
+    { const grp = new T.Group(); add(new T.BoxGeometry(1, .32, .24), mat('#f6f7f8', { roughness: .4 }), 0, 0, .12, grp); add(new T.BoxGeometry(.92, .05, .02), mat('#c9ced4'), 0, -.11, .25, grp); add(new T.BoxGeometry(.04, .04, .02), glowMat('#3ddc84', 2), -.4, .08, .25, grp, false); onWall(wallL, 3.2, 2.62, grp); }
+    // Relógio
+    const clockTex = canvasTex(128, 128, () => {});
+    const drawClock = () => clockTex.redraw((g, W) => {
+      g.clearRect(0, 0, W, W); g.fillStyle = '#fff'; g.beginPath(); g.arc(64, 64, 60, 0, 7); g.fill(); g.lineWidth = 6; g.strokeStyle = '#222'; g.stroke();
+      for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.fillStyle = '#333'; g.fillRect(64 + Math.sin(a) * 48 - 2, 64 - Math.cos(a) * 48 - 2, 4, 4); }
+      const now = new Date(), hand = (a, l, wd, c) => { g.strokeStyle = c; g.lineWidth = wd; g.beginPath(); g.moveTo(64, 64); g.lineTo(64 + Math.sin(a) * l, 64 - Math.cos(a) * l); g.stroke(); };
+      hand((now.getHours() % 12 + now.getMinutes() / 60) / 12 * Math.PI * 2, 30, 6, '#222'); hand(now.getMinutes() / 60 * Math.PI * 2, 44, 4, OR);
+    });
+    drawClock(); setInterval(drawClock, 30000);
+    onWall(wallL, .9, 2.3, panel(.5, .5, clockTex, { transparent: true }));
+    // Quadro decorativo no fundo
+    const artTex = canvasTex(256, 192, (g, W, H) => { const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#ff9f1c'); gr.addColorStop(1, '#7b2ff7'); g.fillStyle = gr; g.fillRect(0, 0, W, H); g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(90, 100, 50, 0, 7); g.fill(); g.fillStyle = '#00e5ff'; g.fillRect(140, 40, 80, 110); });
+
+    // ---------- Móveis ----------
+    const deskTop = mat('#b9875a', { roughness: .5 }), metal = mat('#d6d9dd', { metalness: .6, roughness: .35 }), dark = mat('#2a2c31', { roughness: .5 });
+    const monitorTex = (seed) => canvasTex(256, 160, (g, W, H) => {
+      g.fillStyle = '#0d1b2a'; g.fillRect(0, 0, W, H); const r = rng(seed);
+      g.fillStyle = '#1f3b57'; g.fillRect(0, 0, W, 18);
+      for (let i = 0; i < 8; i++) { g.fillStyle = ['#3aa0ff', '#00e5ff', '#ff9f1c'][i % 3]; g.fillRect(16 + i * 28, 140 - r() * 90, 18, 140); }
+      g.fillStyle = '#0d1b2a'; g.fillRect(0, 140, W, 20);
+    });
+    function chairMesh(x, z, face, color = '#2f3a4a', h = .5, kind = 'office') {
+      const grp = new T.Group(), m = mat(color, { roughness: .6 });
+      if (kind === 'office') {
+        cyl(.03, h - .08, 0, .06, 0, metal, grp);
+        for (let i = 0; i < 5; i++) { const leg = add(new T.BoxGeometry(.04, .03, .28), dark, 0, .04, 0, grp); leg.rotation.y = i / 5 * Math.PI * 2; leg.translateZ(.14); }
+        add(new T.BoxGeometry(.5, .08, .48), m, 0, h, 0, grp);
+        add(new T.BoxGeometry(.48, .55, .07), m, 0, h + .32, -.25, grp);
+      } else if (kind === 'stool') {
+        cyl(.03, h, 0, 0, 0, metal, grp); cyl(.18, .02, 0, 0, 0, metal, grp); cyl(.2, .07, 0, h - .03, 0, m, grp);
+      } else {
+        boxAt(-.42, -.42, .84, .84, h, 0, m, grp); boxAt(-.42, -.5, .84, .2, h + .45, 0, m, grp);
+        boxAt(-.5, -.42, .12, .84, h + .18, 0, m, grp); boxAt(.38, -.42, .12, .84, h + .18, 0, m, grp);
+      }
+      grp.position.set(x, 0, z); grp.rotation.y = YAW[face]; scene.add(grp);
+      return grp;
+    }
+    for (const id in PEOPLE) {
+      const p = PEOPLE[id], [x, z] = p.desk, grp = new T.Group();
+      boxAt(0, 0, 3, 1, .05, .72, id === 'gerente' ? mat('#5b3a26', { roughness: .45 }) : deskTop, grp);
+      [[.05, .05], [2.9, .05], [.05, .9], [2.9, .9]].forEach(([a, b]) => boxAt(a, b, .05, .05, .72, 0, metal, grp));
+      boxAt(.1, .02, 2.8, .03, .45, .25, mat('#e9e3d8'), grp);
+      [.85, 1.6].forEach((mx, i) => {
+        boxAt(mx + .27, .25, .1, .1, .12, .77, dark, grp);
+        boxAt(mx, .22, .66, .04, .42, .9, dark, grp);
+        const scr = panel(.6, .36, monitorTex(id.length * 10 + i)); scr.position.set(mx + .33, 1.11, .2); scr.rotation.y = Math.PI; grp.add(scr);
+      });
+      boxAt(1.1, .6, .9, .25, .02, .77, mat('#30343a'), grp);
+      cyl(.05, .1, 2.55, .77, .6, mat(id === 'gerente' ? '#d9b25b' : '#c8102e'), grp);
+      boxAt(.3, .45, .45, .32, .01, .77, mat('#ffffff'), grp);
+      grp.position.set(x, 0, z); scene.add(grp);
+      grp.traverse(o => { if (o.isMesh) tag(o, p); });
+      chairMesh(p.seat.x, p.seat.y, 'SW', id === 'gerente' ? '#5a2a1a' : '#2f3a4a');
+    }
+    // Lounge: sofá, mesa de centro, poltrona e luminária
+    { const sofaM = mat('#2f6f73', { roughness: .85 }), cushM = mat('#3b8a8f', { roughness: .9 });
+      boxAt(13, 4, 4, .9, .3, .1, sofaM); for (let i = 0; i < 4; i++) boxAt(13.1 + i * .95, 4.05, .9, .75, .1, .4, cushM);
+      boxAt(13, 4.72, 4, .28, .55, .3, sofaM); boxAt(13, 4, .2, 1, .62, 0, sofaM); boxAt(16.8, 4, .2, 1, .62, 0, sofaM);
+      boxAt(13.2, 4.6, .35, .1, .3, .55, mat('#ff9f1c', { roughness: .9 })); boxAt(16.4, 4.6, .35, .1, .3, .55, mat('#e7e1d5', { roughness: .9 }));
+      boxAt(14, 2.2, 2, .75, .05, .38, mat('#3b2a20', { roughness: .4 })); [[14.05, 2.25], [15.9, 2.25], [14.05, 2.9], [15.9, 2.9]].forEach(([a, b]) => boxAt(a, b, .05, .05, .38, 0, metal));
+      boxAt(14.4, 2.4, .35, .25, .04, .43, mat('#d23d3d')); cyl(.12, .02, 15.4, .43, 2.55, mat('#ffffff'));
+      chairMesh(12.5, 2.5, 'SE', '#c98a3a', .42, 'arm');
+      cyl(.15, .03, 17.5, 0, 5.6, metal); cyl(.02, 1.5, 17.5, 0, 5.6, metal);
+      cyl(.2, .3, 17.5, 1.5, 5.6, new T.MeshStandardMaterial({ color: '#fff4d6', emissive: '#ffd890', emissiveIntensity: night ? 1.2 : .5, side: T.DoubleSide }), scene, 20, .14);
+      const lamp = new T.PointLight('#ffd08a', night ? 1.4 : .6, 7, 2); lamp.position.set(17.5, 1.55, 5.6); scene.add(lamp);
+    }
+    // Sala de reunião
+    { const glass = new T.MeshStandardMaterial({ color: '#bfe8ff', transparent: true, opacity: .45, roughness: .05, metalness: .2 });
+      boxAt(7, 7, 3, 2, .04, .74, glass); [[7.2, 7.2], [9.75, 7.2], [7.2, 8.75], [9.75, 8.75]].forEach(([a, b]) => boxAt(a, b, .05, .05, .74, 0, metal));
+      boxAt(7.6, 7.5, .5, .35, .01, .78, mat('#ffffff')); boxAt(9, 8.2, .35, .25, .02, .78, dark);
+      cyl(.18, .25, 8.5, .78, 8, mat('#ffffff'), scene, 16, .12);
+      [[8.35, 7.9], [8.6, 8.1], [8.5, 7.95]].forEach(([a, b], i) => add(new T.IcosahedronGeometry(.14 - i * .02), mat('#e5487b', { flatShading: true }), a, 1.1, b));
+      MEETING.forEach(([x, z, f]) => chairMesh(x, z, f, '#1d2b3a'));
+    }
+    // Copa: balcão, cafeteira e banqueta
+    { boxAt(15, 9, 2.6, .8, .95, 0, mat('#3f2d22', { roughness: .5 })); boxAt(14.95, 8.95, 2.7, .9, .05, .95, mat('#f1efe9', { roughness: .25 }));
+      boxAt(15.3, 9.15, .4, .35, .45, 1, mat('#2b2b2b', { metalness: .4, roughness: .3 })); boxAt(15.36, 9.5, .28, .02, .1, 1.2, glowMat('#ff4040', .8));
+      cyl(.05, .1, 16.3, 1, 9.3, mat('#ffffff')); cyl(.05, .1, 16.6, 1, 9.35, mat('#ffffff'));
+      boxAt(15, 9.8, 2.6, .02, .03, .2, glowMat(OR, 1.6));
+      chairMesh(16.5, 10.5, 'NE', '#c98a3a', .72, 'stool'); }
+    // Bebedouro
+    { boxAt(17.2, 7.2, .5, .5, 1, 0, mat('#f3f4f6', { roughness: .35 })); cyl(.17, .45, 17.45, 1, 7.45, new T.MeshStandardMaterial({ color: '#7fd0ff', transparent: true, opacity: .7, roughness: .1 })); }
+    // Armário de troféus
+    { boxAt(0, 6.6, .55, 1.8, 1, 0, mat('#3f2d22', { roughness: .45 }));
+      const gold = mat('#e6b74c', { metalness: .85, roughness: .25 });
+      [[.27, 6.95], [.27, 7.5], [.27, 8.05]].forEach(([x, z], i) => { cyl(.08, .06, x, 1, z, gold); cyl(.03, .1, x, 1.06, z, gold); add(new T.SphereGeometry(.1 + i * .01, 16, 12, 0, 7, 0, 1.6), gold, x, 1.25, z).rotation.x = Math.PI; }); }
+    // Plantas
+    PLANTS.forEach(([x, z, big]) => {
+      const cx = x + .25, cz = z + .25;
+      cyl(.24, .45, cx, 0, cz, mat('#e9e2d4', { roughness: .6 }), scene, 20, .18);
+      cyl(.2, .02, cx, .44, cz, mat('#4a3424'));
+      const leaf = mat('#3f9a4a', { flatShading: true, roughness: .8 }), leaf2 = mat('#57b85e', { flatShading: true, roughness: .8 });
+      const r = rng(Math.round(cx * 10 + cz));
+      const n = big ? 9 : 5;
+      for (let i = 0; i < n; i++) add(new T.IcosahedronGeometry((big ? .28 : .22) + r() * .1), i % 2 ? leaf : leaf2, cx + (r() - .5) * .45, .65 + r() * (big ? 1.1 : .45), cz + (r() - .5) * .45);
+    });
+    // Quadro decorativo no fundo, entre as TVs e o canto
+    { const grp = new T.Group(); add(new T.BoxGeometry(.9, .7, .04), mat('#1b1b1b'), 0, 0, 0, grp); const p = panel(.82, .62, artTex); p.position.z = .025; grp.add(p); onWall(wallR, 7, 1.7, grp); }
+
+    // ---------- Personagens 3D ----------
+    function faceTex(kind) {
+      return canvasTex(512, 256, (g, W, H) => {
+        const fx = W * .25; // frente da cabeça (+z) fica em u = 0.25
+        if (kind === 'spider') {
+          g.fillStyle = '#c8102e'; g.fillRect(0, 0, W, H);
+          g.strokeStyle = 'rgba(20,0,0,.55)'; g.lineWidth = 2;
+          for (let i = -8; i <= 8; i++) { g.beginPath(); g.moveTo(fx, 120); g.lineTo(fx + i * 34, i % 2 ? 0 : 256); g.stroke(); }
+          for (let r = 30; r < 300; r += 28) { g.beginPath(); g.ellipse(fx, 120, r * 1.2, r, 0, 0, 7); g.stroke(); }
+          for (let x = 0; x < W; x += 30) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+          [[-1, 1], [1, 1]].forEach(([s]) => { g.save(); g.translate(fx + s * 40, 112); g.rotate(s * -.35); g.fillStyle = '#000'; g.beginPath(); g.ellipse(0, 0, 30, 22, 0, 0, 7); g.fill(); g.fillStyle = '#fff'; g.beginPath(); g.ellipse(0, 0, 24, 16, 0, 0, 7); g.fill(); g.restore(); });
+        } else if (kind === 'deadpool') {
+          g.fillStyle = '#b3121a'; g.fillRect(0, 0, W, H);
+          g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(fx - 2, 0, 4, H); g.fillRect(fx + W / 2 - 2, 0, 4, H);
+          [[-1], [1]].forEach(([s]) => { g.fillStyle = '#111'; g.beginPath(); g.ellipse(fx + s * 42, 112, 36, 30, 0, 0, 7); g.fill(); g.fillStyle = '#fff'; g.beginPath(); g.ellipse(fx + s * 40, 114, 14, 9, 0, 0, 7); g.fill(); });
+        } else if (kind === 'venom') {
+          g.fillStyle = '#121216'; g.fillRect(0, 0, W, H);
+          g.strokeStyle = 'rgba(80,110,170,.35)'; g.lineWidth = 6; for (let i = 0; i < 12; i++) { g.beginPath(); g.moveTo(i * 44, 0); g.quadraticCurveTo(i * 44 + 20, 120, i * 44 - 10, H); g.stroke(); }
+          [[-1], [1]].forEach(([s]) => { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(fx + s * 12, 118); g.quadraticCurveTo(fx + s * 30, 60, fx + s * 78, 78); g.lineTo(fx + s * 60, 120); g.quadraticCurveTo(fx + s * 40, 132, fx + s * 12, 118); g.fill(); });
+          g.fillStyle = '#fff'; g.beginPath(); g.ellipse(fx, 175, 62, 28, 0, 0, Math.PI); g.fill();
+          g.fillStyle = '#111'; for (let i = -5; i <= 5; i++) { g.beginPath(); g.moveTo(fx + i * 11 - 4, 175); g.lineTo(fx + i * 11, 195 - Math.abs(i) * 2); g.lineTo(fx + i * 11 + 4, 175); g.fill(); }
+          g.fillStyle = '#c2185b'; g.beginPath(); g.ellipse(fx + 8, 196, 14, 9, .3, 0, 7); g.fill();
+        } else {
+          g.fillStyle = '#1b1b21'; g.fillRect(0, 0, W, H);
+          g.fillStyle = '#e0ab82'; g.beginPath(); g.moveTo(fx - 58, 150); g.quadraticCurveTo(fx, 128, fx + 58, 150); g.lineTo(fx + 66, 256); g.lineTo(fx - 66, 256); g.fill();
+          g.fillStyle = '#7a3b2a'; g.fillRect(fx - 18, 180, 36, 5);
+          g.fillStyle = '#fff'; [[-1], [1]].forEach(([s]) => { g.beginPath(); g.moveTo(fx + s * 14, 112); g.lineTo(fx + s * 54, 104); g.lineTo(fx + s * 50, 118); g.lineTo(fx + s * 16, 122); g.fill(); });
+        }
+      });
+    }
+    function emblem(kind) {
+      return canvasTex(256, 256, (g, W, H) => {
+        g.clearRect(0, 0, W, H); g.translate(W / 2, H / 2);
+        if (kind === 'batman') {
+          g.fillStyle = '#f2c230'; g.beginPath(); g.ellipse(0, 0, 120, 74, 0, 0, 7); g.fill();
+          g.fillStyle = '#111'; g.beginPath(); g.moveTo(-105, -10); g.quadraticCurveTo(-60, -40, -30, -30); g.lineTo(-14, -48); g.lineTo(-8, -24); g.lineTo(8, -24); g.lineTo(14, -48); g.lineTo(30, -30);
+          g.quadraticCurveTo(60, -40, 105, -10); g.quadraticCurveTo(70, 0, 60, 30); g.quadraticCurveTo(30, 10, 0, 48); g.quadraticCurveTo(-30, 10, -60, 30); g.quadraticCurveTo(-70, 0, -105, -10); g.fill();
+        } else {
+          const c = kind === 'venom' ? '#f5f5f5' : '#111', s = kind === 'venom' ? 1.6 : 1;
+          g.scale(s, s); g.strokeStyle = c; g.fillStyle = c; g.lineWidth = 8;
+          g.beginPath(); g.ellipse(0, -14, 14, 18, 0, 0, 7); g.fill(); g.beginPath(); g.ellipse(0, 22, 18, 26, 0, 0, 7); g.fill();
+          [[-1], [1]].forEach(([d]) => { [-30, -6, 14, 34].forEach((y, i) => { g.beginPath(); g.moveTo(d * 10, y * .5); g.lineTo(d * 40, y - 14); g.lineTo(d * (52 + i * 4), y + 22); g.stroke(); }); });
+        }
+      });
+    }
+    const COSTUMES = {
+      spider:   { suit: '#c8102e', legs: '#1d4fa8', arm: '#c8102e', hands: '#c8102e', boots: '#c8102e', emblem: 'spider', side: '#1d4fa8' },
+      deadpool: { suit: '#b3121a', legs: '#b3121a', arm: '#b3121a', hands: '#1a1a1a', boots: '#1a1a1a', belt: ['#2a2a2a', '#e6b74c'], katanas: true, side: '#1a1a1a' },
+      venom:    { suit: '#141418', legs: '#141418', arm: '#141418', hands: '#141418', boots: '#141418', emblem: 'venom', gloss: true },
+      batman:   { suit: '#5a606b', legs: '#4a4f59', arm: '#5a606b', hands: '#1c1c22', boots: '#1c1c22', emblem: 'batman', belt: ['#e6b74c', '#e6b74c'], cape: true, ears: true },
+    };
+    function plumbobColor(p) {
+      if (p.id === 'copy') { const b = [...allAds].sort((a, z) => z.ad.m.ctr - a.ad.m.ctr)[0]; return b.ad.m.ctr >= .012 ? 'good' : 'warning'; }
+      if (p.id === 'analista') return statusOf(Math.min(...CAMPAIGNS.map(c => c.m.cpl)));
+      return statusOf(total().cpl);
+    }
+    function buildSim(p) {
+      const C = COSTUMES[p.costume], root = new T.Group(), body = new T.Group();
+      root.add(body);
+      const sm = (c, o = {}) => mat(c, { roughness: C.gloss ? .25 : .6, metalness: C.gloss ? .3 : 0, ...o });
+      const suit = sm(C.suit), legs = sm(C.legs), arm = sm(C.arm), hands = sm(C.hands), boots = sm(C.boots);
+      // Pernas: coxa (pivô no quadril) + canela (pivô no joelho)
+      const mkLeg = s => {
+        const hip = new T.Group(); hip.position.set(s * .1, .92, 0); body.add(hip);
+        add(new T.CapsuleGeometry(.075, .3, 4, 10), legs, 0, -.2, 0, hip);
+        const knee = new T.Group(); knee.position.y = -.43; hip.add(knee);
+        add(new T.CapsuleGeometry(.065, .32, 4, 10), legs, 0, -.21, 0, knee);
+        add(new T.BoxGeometry(.13, .09, .24), boots, 0, -.45, .04, knee);
+        return { hip, knee };
+      };
+      const L = mkLeg(1), Rg = mkLeg(-1);
+      // Tronco
+      const torso = add(new T.CapsuleGeometry(.17, .32, 6, 14), suit, 0, 1.22, 0, body);
+      torso.scale.set(1.18, 1, .78);
+      if (C.side) { [-1, 1].forEach(s => { const sd = add(new T.CapsuleGeometry(.05, .3, 4, 8), sm(C.side), s * .19, 1.2, 0, body); sd.scale.set(.6, 1, 1.4); }); }
+      add(new T.CylinderGeometry(.07, .08, .1, 12), suit, 0, 1.58, 0, body);
+      if (C.belt) { boxAt(-.2, -.13, .4, .26, .07, .9, sm(C.belt[0]), body); add(new T.BoxGeometry(.08, .07, .02), sm(C.belt[1], { metalness: .7, roughness: .3 }), 0, .935, .135, body); }
+      if (C.emblem) { const e = new T.Mesh(new T.PlaneGeometry(C.emblem === 'venom' ? .34 : .2, C.emblem === 'batman' ? .13 : (C.emblem === 'venom' ? .34 : .2)), new T.MeshStandardMaterial({ map: emblem(C.emblem), transparent: true, roughness: .5 })); e.position.set(0, 1.3, .137); body.add(e); }
+      // Braços: ombro + cotovelo
+      const mkArm = s => {
+        const sh = new T.Group(); sh.position.set(s * .26, 1.46, 0); body.add(sh);
+        add(new T.SphereGeometry(.075, 12, 10), suit, 0, 0, 0, sh);
+        add(new T.CapsuleGeometry(.055, .22, 4, 10), arm, 0, -.17, 0, sh);
+        const el = new T.Group(); el.position.y = -.34; sh.add(el);
+        add(new T.CapsuleGeometry(.05, .2, 4, 10), arm, 0, -.14, 0, el);
+        add(new T.SphereGeometry(.065, 12, 10), hands, 0, -.3, 0, el);
+        return { sh, el };
+      };
+      const AL = mkArm(1), AR = mkArm(-1);
+      // Cabeça grande (estilo Sims)
+      const head = new T.Group(); head.position.y = 1.8; body.add(head);
+      add(new T.SphereGeometry(.21, 32, 24), new T.MeshStandardMaterial({ map: faceTex(p.costume), roughness: C.gloss ? .25 : .55, metalness: C.gloss ? .25 : 0 }), 0, 0, 0, head);
+      if (C.ears) [-1, 1].forEach(s => { const e = add(new T.ConeGeometry(.045, .16, 6), sm('#1b1b21'), s * .11, .2, 0, head); e.rotation.z = -s * .15; });
+      let cape = null;
+      if (C.cape) {
+        const g = new T.PlaneGeometry(.66, 1.2, 1, 6); g.translate(0, -.6, 0);
+        cape = new T.Mesh(g, new T.MeshStandardMaterial({ color: '#1b1b21', side: T.DoubleSide, roughness: .7 }));
+        cape.position.set(0, 1.56, -.16); cape.castShadow = true; body.add(cape);
+      }
+      if (C.katanas) [-1, 1].forEach(s => { const k = new T.Group(); k.position.set(0, 1.3, -.16); k.rotation.z = s * .55; body.add(k); add(new T.BoxGeometry(.035, .78, .015), sm('#b8bcc4', { metalness: .9, roughness: .2 }), 0, .05, 0, k); add(new T.BoxGeometry(.045, .2, .04), sm('#1a1a1a'), 0, .5, 0, k); });
+      // Plumbob
+      const plum = new T.Mesh(new T.OctahedronGeometry(.1, 0), new T.MeshStandardMaterial({ color: '#2fe05a', emissive: '#2fe05a', emissiveIntensity: .9, roughness: .2, transparent: true, opacity: .92 }));
+      plum.scale.set(1, 1.9, 1); plum.position.y = 2.38; root.add(plum);
+      const pc = STATUS[plumbobColor(p)].color; plum.material.color.set(pc); plum.material.emissive.set(pc);
+      root.traverse(o => { if (o.isMesh) { o.castShadow = true; tag(o, p); } });
+      plum.castShadow = false;
+      scene.add(root);
+      return { root, body, L, R: Rg, AL, AR, head, cape, plum };
+    }
+    for (const id in PEOPLE) PEOPLE[id].sim = buildSim(PEOPLE[id]);
+
+    function animateSim(p, t, dt) {
+      const S = p.sim, walking = p.path.length > 0, sit = walking ? null : p.sitAt;
+      S.root.position.set(p.pos.x, 0, p.pos.y);
+      let dy = (p.targetYaw ?? 0) - p.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      p.yaw += dy * Math.min(1, dt * .012); S.root.rotation.y = p.yaw;
+      const lerp = (o, k, v) => { o[k] += (v - o[k]) * Math.min(1, dt * .015); };
+      let hipL = 0, hipR = 0, kneeL = 0, kneeR = 0, shL = 0, shR = 0, elL = 0, elR = 0, bodyY = 0;
+      if (walking) {
+        p.walkPhase += dt * .011;
+        const s = Math.sin(p.walkPhase);
+        hipL = s * .55; hipR = -s * .55; kneeL = Math.max(0, -s) * .7; kneeR = Math.max(0, s) * .7;
+        shL = -s * .45; shR = s * .45; elL = elR = -.25; bodyY = Math.abs(Math.cos(p.walkPhase)) * .035;
+      } else if (sit) {
+        hipL = hipR = -Math.PI / 2; kneeL = kneeR = Math.PI / 2; bodyY = sit.h - .92 + .02;
+        if (p.home && p.id !== 'gerente') { const k = Math.sin(t * .02 + p.seat.x) * .08; shL = -.75 + k; shR = -.75 - k; elL = elR = -.7; }
+        else { shL = shR = -.25; elL = elR = -.6; }
+      } else { const b = Math.sin(t * .002 + p.seat.x) * .03; shL = b; shR = -b; }
+      lerp(S.L.hip.rotation, 'x', hipL); lerp(S.R.hip.rotation, 'x', hipR);
+      lerp(S.L.knee.rotation, 'x', kneeL); lerp(S.R.knee.rotation, 'x', kneeR);
+      lerp(S.AL.sh.rotation, 'x', shL); lerp(S.AR.sh.rotation, 'x', shR);
+      lerp(S.AL.el.rotation, 'x', elL); lerp(S.AR.el.rotation, 'x', elR);
+      S.AL.sh.rotation.z = .08; S.AR.sh.rotation.z = -.08;
+      lerp(S.body.position, 'y', bodyY);
+      S.head.rotation.y = Math.sin(t * .0009 + p.seat.x * 3) * .25;
+      if (S.cape) S.cape.rotation.x = (walking ? .35 + Math.sin(p.walkPhase * 2) * .08 : sit ? .2 : .1);
+      S.plum.rotation.y = t * .002; S.plum.position.y = 2.38 + S.body.position.y + Math.sin(t * .003) * .04;
+    }
+
+    // ---------- Câmera: botões estilo Sims ----------
+    let camAnim = null;
+    function rotateBy(da) {
+      const off = camera.position.clone().sub(controls.target);
+      const sph = new T.Spherical().setFromVector3(off);
+      camAnim = { from: sph.theta, to: sph.theta + da, t: 0, sph };
+    }
+    function zoomBy(f) { const off = camera.position.clone().sub(controls.target).multiplyScalar(f); const len = off.length(); if (len > controls.minDistance && len < controls.maxDistance) camera.position.copy(controls.target).add(off); }
+    const camctl = document.getElementById('camctl');
+    camctl.innerHTML = '<button data-a="l" title="Girar para a esquerda">⟲</button><button data-a="r" title="Girar para a direita">⟳</button><button data-a="in" title="Aproximar">＋</button><button data-a="out" title="Afastar">－</button><button data-a="home" title="Câmera inicial">⌂</button>';
+    camctl.onclick = e => {
+      const a = e.target.closest('button')?.dataset.a; if (!a) return;
+      if (a === 'l') rotateBy(Math.PI / 2); else if (a === 'r') rotateBy(-Math.PI / 2);
+      else if (a === 'in') zoomBy(.8); else if (a === 'out') zoomBy(1.25);
+      else { controls.target.copy(HOME.target); placeCamera(HOME.az, HOME.polar, HOME.dist); }
+    };
+
+    // ---------- Clique e hover ----------
+    const ray = new T.Raycaster(), mouse = new T.Vector2();
+    let hoverTarget = null, downAt = null;
+    function pick(e) {
+      const r = canvas.getBoundingClientRect();
+      mouse.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(mouse, camera);
+      const hits = ray.intersectObjects(clickables.filter(o => { let v = o; while (v) { if (!v.visible) return false; v = v.parent; } return true; }), false);
+      return hits.length ? hits[0].object.userData.target : null;
+    }
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType !== 'mouse') return;
+      hoverTarget = pick(e);
+      canvas.style.cursor = hoverTarget ? 'pointer' : 'grab';
+      for (const id in PEOPLE) PEOPLE[id].tagEl.classList.toggle('hot', hoverTarget === PEOPLE[id]);
+    });
+    canvas.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+    canvas.addEventListener('pointerup', e => {
+      if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+      const h = pick(e); if (h) activate(h);
+    });
+
+    // ---------- Tamanho ----------
+    function resize() {
+      const w = stage.clientWidth, h = stage.clientHeight;
+      renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    }
+    new ResizeObserver(resize).observe(stage); resize();
+
+    // ---------- Loop ----------
+    const v = new T.Vector3();
+    let last = performance.now(), lastTV = 0;
+    function frame(t) {
+      const dt = Math.min(60, t - last); last = t;
+      for (const id in PEOPLE) step(PEOPLE[id], dt);
+      if (!tour && t > nextChat && !backdrop.classList.contains('open')) { const [p, m] = CHATTER[chatIdx++ % CHATTER.length](); say(p, m); nextChat = t + 6000; }
+      for (const id in PEOPLE) animateSim(PEOPLE[id], t, dt);
+      if (camAnim) {
+        camAnim.t = Math.min(1, camAnim.t + dt / 450);
+        const k = camAnim.t < .5 ? 2 * camAnim.t * camAnim.t : 1 - Math.pow(-2 * camAnim.t + 2, 2) / 2;
+        camAnim.sph.theta = camAnim.from + (camAnim.to - camAnim.from) * k;
+        camera.position.copy(controls.target).add(new T.Vector3().setFromSpherical(camAnim.sph));
+        if (camAnim.t >= 1) camAnim = null;
+      }
+      controls.update();
+      // Paredes abaixam quando a câmera está do lado de fora delas
+      for (const w of walls) {
+        const c = w.axis === 'x' ? camera.position.x : camera.position.z;
+        const inside = w.inward > 0 ? c > w.at : c < w.at;
+        w.full.visible = inside; w.low.visible = !inside;
+      }
+      if (t - lastTV > 500) { lastTV = t; screens.forEach(s => s.tex.redraw((g, W, H) => s.drawFn(g, W, H, t))); }
+      renderer.render(scene, camera);
+      // Etiquetas e balões
+      const W = stage.clientWidth, H = stage.clientHeight;
+      for (const id in PEOPLE) {
+        const p = PEOPLE[id];
+        v.set(p.pos.x, 2.6 + p.sim.body.position.y, p.pos.y).project(camera);
+        const behind = v.z > 1, x = (v.x + 1) / 2 * W, y = (1 - v.y) / 2 * H;
+        p.tagEl.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+        p.bubbleEl.style.transform = `translate(${x}px, ${y - 30}px) translate(-50%, -100%)`;
+        p.tagEl.style.visibility = p.bubbleEl.style.visibility = behind ? 'hidden' : 'visible';
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    // A meta mudou: redesenha o quadro e as TVs
+    metaInput.addEventListener('change', () => {
+      posterTex.redraw((g, W, H) => {
+        g.fillStyle = '#fffaf0'; g.fillRect(0, 0, W, H); g.fillStyle = '#e07b22'; g.fillRect(0, 0, W, 34);
+        g.fillStyle = '#fff'; g.font = '800 20px Orbitron, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'top'; g.fillText('META DE CPL', W / 2, 7);
+        g.fillStyle = '#111'; g.font = '800 46px Orbitron, sans-serif'; g.fillText(brl0.format(metaCPL), W / 2, 62);
+        g.fillStyle = '#555'; g.font = '600 18px system-ui'; g.fillText(`${int.format(total().leads)} leads nos últimos 7 dias`, W / 2, 140);
+      });
+      bigScreen.tex.redraw((g, W, H) => bigScreen.drawFn(g, W, H, 0));
+      for (const id in PEOPLE) { const pc = STATUS[plumbobColor(PEOPLE[id])].color; PEOPLE[id].sim.plum.material.color.set(pc); PEOPLE[id].sim.plum.material.emissive.set(pc); }
+    });
+    // Fontes carregadas depois: redesenha textos das telas
+    if (document.fonts) document.fonts.ready.then(() => { bigScreen.tex.redraw((g, W, H) => bigScreen.drawFn(g, W, H, 0)); metaInput.dispatchEvent(new Event('change')); });
+  }
 
   // ---------- Janela ----------
   const backdrop = document.getElementById('backdrop');
@@ -1210,7 +1317,6 @@
     `);
   }
 
-  requestAnimationFrame(frame);
 })();
 </script>
 </body>
